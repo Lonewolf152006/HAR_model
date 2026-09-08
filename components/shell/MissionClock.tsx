@@ -23,7 +23,7 @@ export function MissionClock() {
     <div className="flex items-center gap-2.5 px-3 py-1 bg-[#12151A] bezel-depth-subtle border border-white/10 rounded-[2px]">
       <div className="flex flex-col">
         <span className="text-[9px] uppercase tracking-widest text-[#8A919C] font-mono leading-none">
-          MET // CLOCK
+          MET
         </span>
         <div className="flex items-center gap-1.5 mt-0.5">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#00E08A] glow-nominal animate-pulse" />

@@ -10,9 +10,9 @@ import {
   Radio,
   Sliders,
   ShieldCheck,
+  ArrowLeft,
 } from "lucide-react";
 import { APP_ROUTES } from "@/lib/constants";
-import { useTelemetry } from "@/context/TelemetryContext";
 
 const ICON_MAP = {
   "live-feed": Video,
@@ -24,7 +24,6 @@ const ICON_MAP = {
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { currentState, confidence, cyclesCompleted } = useTelemetry();
 
   return (
     <aside className="w-64 border-r border-white/10 bg-[#0B0D10] flex flex-col justify-between select-none shrink-0">
@@ -47,7 +46,7 @@ export function Sidebar() {
         {/* Navigation Breaker Switchboard */}
         <nav className="p-2 space-y-1">
           <div className="px-2 py-1.5 text-[9px] font-mono uppercase tracking-widest text-[#565C66]">
-            NAVIGATION // CONSOLE BUS
+            NAVIGATION: CONSOLE BUS
           </div>
 
           {APP_ROUTES.map((route) => {
@@ -88,25 +87,21 @@ export function Sidebar() {
         </nav>
       </div>
 
-      {/* Persistent Bottom Status Footprint */}
-      <div className="p-3 border-t border-white/10 bg-[#12151A] bezel-depth-subtle space-y-2">
-        <div className="flex items-center justify-between font-mono text-[10px] text-[#8A919C]">
-          <span>CURRENT STATE</span>
-          <span className="text-[#00E08A] font-semibold flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#00E08A] glow-nominal" />
-            {currentState}
-          </span>
+      {/* Persistent Bottom Utility Footer */}
+      <div className="p-3 border-t border-white/10 bg-[#12151A] bezel-depth-subtle space-y-2.5">
+        <div className="flex items-center justify-between font-mono text-[10px] text-[#565C66] pb-2 border-b border-white/5">
+          <span>SESSION ID</span>
+          <span className="text-[#8A919C] tracking-wider">EXP-2026-0924</span>
         </div>
 
-        <div className="flex items-center justify-between font-mono text-[10px] text-[#8A919C]">
-          <span>CONFIDENCE</span>
-          <span className="text-[#E6E9ED] font-bold">{(confidence * 100).toFixed(0)}%</span>
-        </div>
-
-        <div className="flex items-center justify-between font-mono text-[10px] text-[#8A919C] pt-1 border-t border-white/5">
-          <span>CYCLES COMPLETED</span>
-          <span className="text-[#4DA3FF] font-bold">#{cyclesCompleted}</span>
-        </div>
+        <Link
+          href="/"
+          className="group flex items-center gap-2 py-1 px-1 text-xs font-mono text-[#8A919C] hover:text-[#E6E9ED] transition-colors rounded-[2px]"
+          title="Exit avionics console and return to mission briefing"
+        >
+          <ArrowLeft className="w-3.5 h-3.5 text-[#565C66] group-hover:text-[#E6E9ED] transition-transform group-hover:-translate-x-0.5" />
+          <span className="tracking-wider text-[11px] font-medium">RETURN TO MISSION BRIEF</span>
+        </Link>
       </div>
     </aside>
   );

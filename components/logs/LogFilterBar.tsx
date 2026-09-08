@@ -125,9 +125,9 @@ export function LogFilterBar({
       id: "ALERT",
       label: "ALERT",
       count: counts.ALERT,
-      activeColor: "text-[#FFB020]",
-      activeBorder: "border-[#FFB020]/60",
-      activeBg: "bg-[#FFB020]/15",
+      activeColor: "text-[#FF4D4F]",
+      activeBorder: "border-[#FF4D4F]/60",
+      activeBg: "bg-[#FF4D4F]/15",
     },
     {
       id: "INFO",

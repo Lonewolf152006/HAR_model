@@ -57,7 +57,6 @@ export function StateEngineSnapshot() {
   return (
     <AvionicsPanel
       title="STATE ENGINE SNAPSHOT"
-      indexTag="03 // GATES & CONFIDENCE"
       badge={
         <div className="flex items-center gap-1 font-mono text-[9px]">
           <span

@@ -61,10 +61,15 @@ const BLOCKED_EDGES = [
 ];
 
 export function FsmGraphPanel() {
-  const { currentState, expectedNext, fsm } = useTelemetry();
+  const { currentState, expectedNext, fsm, containment } = useTelemetry();
 
   const fsmItems = [
-    { key: "box_open", label: "BOX_OPEN", val: fsm.box_open, rule: "LID >= 45°" },
+    {
+      key: "box_open",
+      label: "BOX_OPEN [MAIN]",
+      val: fsm.box_open,
+      rule: `MAIN STOWAGE: ${containment.main_box}`,
+    },
     {
       key: "red_picked",
       label: "RED_PICKED",
@@ -94,7 +99,6 @@ export function FsmGraphPanel() {
   return (
     <AvionicsPanel
       title="CAUSAL FSM TOPOLOGY"
-      indexTag="02 // DIRECTED GRAPH"
       badge={
         <div className="flex items-center gap-1 font-mono text-[9px] text-[#00E08A]">
           <GitCommit className="w-3 h-3 glow-nominal" />

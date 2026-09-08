@@ -33,7 +33,6 @@ export function StateNextCard({
   return (
     <AvionicsPanel
       title="STATE ENGINE"
-      indexTag="01 // FSM"
       badge={
         <span className="font-mono text-[10px] text-[#00E08A] bg-[#171B21] px-1.5 py-0.5 rounded-[2px] border border-[#00E08A]/40 flex items-center gap-1.5 glow-nominal bezel-depth-subtle">
           <Activity className="w-3 h-3 animate-pulse" />

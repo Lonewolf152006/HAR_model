@@ -16,8 +16,7 @@ export function SystemTogglesPanel() {
 
   return (
     <AvionicsPanel
-      title="SYSTEM PREFERENCES // AVIONICS BUS"
-      indexTag="05 // BUS CONTROL"
+      title="SYSTEM PREFERENCES & AVIONICS BUS"
       className="p-3 font-mono flex flex-col justify-between"
     >
       <div className="space-y-2">
@@ -112,7 +111,7 @@ export function SystemTogglesPanel() {
       {/* Utility Action: Replay Boot Sequence */}
       <div className="pt-2 mt-2 border-t border-white/5 flex items-center justify-between">
         <span className="text-[8.5px] text-[#565C66]">
-          DIAGNOSTIC UTILITY // CRT TERMINAL LOADER
+          DIAGNOSTIC UTILITY: CRT TERMINAL LOADER
         </span>
 
         <button

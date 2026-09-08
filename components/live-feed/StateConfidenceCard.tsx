@@ -75,23 +75,11 @@ export function StateConfidenceCard({
   return (
     <AvionicsPanel
       title="STATE ENGINE & CONFIDENCE"
-      indexTag="01 // FSM + SPARKLINE"
       badge={
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-[10px] text-[#00E08A] bg-[#171B21] px-1.5 py-0.5 rounded-[2px] border border-[#00E08A]/40 flex items-center gap-1.5 glow-nominal bezel-depth-subtle">
-            <Activity className="w-2.5 h-2.5 animate-pulse" />
-            ACTIVE
-          </span>
-          <span
-            className={`font-mono text-[10px] px-1.5 py-0.5 rounded-[2px] border font-bold ${
-              isPassing
-                ? "text-[#00E08A] border-[#00E08A]/40 glow-nominal bg-[#171B21]"
-                : "text-[#FF4D4F] border-[#FF4D4F]/50 glow-critical bg-[#1A0E10] animate-pulse"
-            }`}
-          >
-            {(confidence * 100).toFixed(0)}%
-          </span>
-        </div>
+        <span className="font-mono text-[10px] text-[#00E08A] bg-[#171B21] px-1.5 py-0.5 rounded-[2px] border border-[#00E08A]/40 flex items-center gap-1.5 glow-nominal bezel-depth-subtle">
+          <Activity className="w-2.5 h-2.5 animate-pulse" />
+          ACTIVE
+        </span>
       }
       bracketColor="border-[#00E08A]/60"
       className="shrink-0 p-2.5"
@@ -115,7 +103,7 @@ export function StateConfidenceCard({
             </span>
             <div className="text-xs text-[#E6E9ED] font-semibold flex items-center justify-end gap-1">
               <ArrowRight className="w-3 h-3 text-[#4DA3FF] glow-info shrink-0" />
-              <span>{nextDef.name.split("//")[1] || nextDef.name}</span>
+              <span>{nextDef.name}</span>
               <span className="text-[9px] text-[#8A919C]">({elapsedSec}s)</span>
             </div>
           </div>

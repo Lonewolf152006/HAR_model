@@ -62,7 +62,6 @@ export function LocalRecordingPanel() {
   return (
     <AvionicsPanel
       title="LOCAL EDGE RECORDER"
-      indexTag="04 // ON-BOARD NVRAM"
       badge={getRecBadge()}
       className={`h-full flex flex-col justify-between overflow-hidden p-3 transition-colors duration-200 ${
         isStreamDown
@@ -96,7 +95,7 @@ export function LocalRecordingPanel() {
               {formatTimer(elapsedMs)}
             </div>
             <div className="text-[9px] font-mono text-[#8A919C] mt-0.5">
-              CODEC: 1080p60 // ON-BOARD DISK CACHE
+              CODEC: 1080p60 | ON-BOARD DISK CACHE
             </div>
           </div>
 
@@ -131,7 +130,7 @@ export function LocalRecordingPanel() {
             <HardDrive className="w-3 h-3 text-[#8A919C]" />
             <span>NVRAM SOLID STATE STORAGE</span>
           </div>
-          <span>SLOT 01 // PARTITION B</span>
+          <span>SLOT 01 : PARTITION B</span>
         </div>
 
         {/* File Path & Current Size */}

@@ -15,8 +15,7 @@ export function CameraSourcePanel() {
 
   return (
     <AvionicsPanel
-      title="OPTICAL SENSOR // CAMERA SOURCE"
-      indexTag="05 // FEED SELECT"
+      title="OPTICAL SENSOR CAMERA SOURCE"
       badge={
         <span className="px-2 py-0.5 font-mono text-[9px] font-bold rounded-[2px] border bg-[#00E08A]/10 text-[#00E08A] border-[#00E08A]/50 glow-nominal flex items-center gap-1">
           <span className="w-1.5 h-1.5 rounded-full bg-[#00E08A] animate-pulse" />
@@ -64,7 +63,7 @@ export function CameraSourcePanel() {
           </div>
 
           <div className="text-xs sm:text-sm font-bold text-[#E6E9ED] tracking-wide">
-            {activeConfig.resolutionFps} // {activeConfig.sensor}
+            {activeConfig.resolutionFps} | {activeConfig.sensor}
           </div>
 
           <div className="flex items-center justify-between text-[9px] text-[#8A919C] mt-1.5 pt-1.5 border-t border-white/5">

@@ -17,7 +17,7 @@ export function AlertBanner({ alertText }: AlertBannerProps) {
         <div className="min-w-0">
           <div className="font-mono text-[10px] uppercase tracking-widest text-[#FF4D4F] font-bold flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-[#FF4D4F] glow-critical animate-ping" />
-            <span>AVIONICS TELEMETRY FAULT // VOICED ALERT</span>
+            <span>AVIONICS TELEMETRY FAULT: VOICED ALERT</span>
           </div>
           <p className="font-mono text-xs text-[#E6E9ED] font-semibold truncate mt-0.5">
             {alertText}

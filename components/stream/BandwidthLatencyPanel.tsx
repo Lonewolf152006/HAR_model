@@ -31,8 +31,7 @@ export function BandwidthLatencyPanel() {
 
   return (
     <AvionicsPanel
-      title="BANDWIDTH // LATENCY"
-      indexTag="04 // UPLINK STATS"
+      title="BANDWIDTH & LATENCY"
       className="h-full flex flex-col justify-between overflow-hidden p-3"
     >
       <div className="grid grid-cols-2 gap-2 h-full font-mono">

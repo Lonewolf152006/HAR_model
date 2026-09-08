@@ -3,7 +3,7 @@
 import React from "react";
 import { AvionicsPanel } from "@/components/ui/AvionicsPanel";
 import { ContainmentState, ContainmentStatus } from "@/lib/types";
-import { Box, Layers } from "lucide-react";
+import { Box } from "lucide-react";
 
 interface ContainmentBadgesCardProps {
   containment: ContainmentState;
@@ -30,13 +30,6 @@ export function ContainmentBadgesCard({ containment }: ContainmentBadgesCardProp
   return (
     <AvionicsPanel
       title="GEOMETRIC CONTAINMENT"
-      indexTag="03 // 2.5D ENGINE"
-      badge={
-        <div className="flex items-center gap-1 font-mono text-[9px] text-[#4DA3FF]">
-          <Layers className="w-3 h-3 glow-info" />
-          <span>CALIBRATED</span>
-        </div>
-      }
       className="shrink-0 p-2.5"
     >
       <div className="space-y-1.5 font-mono text-xs overflow-y-auto max-h-[130px] pr-0.5">

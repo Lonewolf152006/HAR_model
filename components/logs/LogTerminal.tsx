@@ -94,7 +94,7 @@ export function LogTerminal({ logs, currentFilter }: LogTerminalProps) {
       case "REJECTED":
         return "text-[#FF4D4F]";
       case "ALERT":
-        return "text-[#FFB020]";
+        return "text-[#FF4D4F]";
       case "INFO":
       default:
         return "text-[#8A919C]";
@@ -108,7 +108,7 @@ export function LogTerminal({ logs, currentFilter }: LogTerminalProps) {
       case "REJECTED":
         return "text-[#FF4D4F]";
       case "ALERT":
-        return "text-[#FFB020]";
+        return "text-[#FF4D4F]";
       case "INFO":
       default:
         return "text-[#8A919C]";
@@ -128,7 +128,7 @@ export function LogTerminal({ logs, currentFilter }: LogTerminalProps) {
         <div className="flex items-center gap-2.5">
           <Terminal className="w-3.5 h-3.5 text-[#00E08A]" />
           <h2 className="font-mono text-[11px] font-bold text-[#E6E9ED] tracking-wider uppercase">
-            BLACK-BOX RECORDER // LIVE TAIL
+            BLACK-BOX FLIGHT RECORDER — LIVE TAIL
           </h2>
           <span className="text-[#565C66] font-mono text-[10px]">|</span>
           <span className="font-mono text-[10px] text-[#8A919C]">

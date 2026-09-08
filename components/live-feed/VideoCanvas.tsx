@@ -3,11 +3,19 @@
 import React, { useState, useRef } from "react";
 import { useTelemetry } from "@/context/TelemetryContext";
 import { AvionicsPanel } from "@/components/ui/AvionicsPanel";
-import { Crosshair, Radio, Shield, Target, Clock, Activity, Cpu, ShieldCheck } from "lucide-react";
+import { Crosshair, Radio, Target, Activity, Cpu, ShieldCheck, AlertTriangle } from "lucide-react";
 
 export function VideoCanvas() {
-  const { currentState, expectedNext, confidence, boundingBoxes, frame, cyclesCompleted } =
-    useTelemetry();
+  const {
+    currentState,
+    expectedNext,
+    confidence,
+    boundingBoxes,
+    frame,
+    cyclesCompleted,
+    activeAlert,
+    isReducedMotion,
+  } = useTelemetry();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [reticlePos, setReticlePos] = useState({ x: 50, y: 50 });
@@ -26,18 +34,25 @@ export function VideoCanvas() {
 
   return (
     <AvionicsPanel
-      className="p-0 overflow-hidden bg-[#0A0C0F] border border-white/15 h-full flex flex-col min-h-0 shadow-2xl"
-      bracketColor="border-[#00E08A]"
+      key="avionics-video-canvas"
+      className={`p-0 overflow-hidden bg-[#0A0C0F] border h-full flex flex-col min-h-0 shadow-2xl transition-colors duration-150 ${
+        activeAlert?.active
+          ? !isReducedMotion
+            ? "animate-alert-border-sustained border-[#FF4D4F]"
+            : "border-[#FF4D4F]"
+          : "border-white/15"
+      }`}
+      bracketColor={activeAlert?.active ? "border-[#FF4D4F]" : "border-[#00E08A]"}
     >
       {/* Top Header Flight Strip */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-[#12151A] border-b border-white/10 font-mono text-xs select-none shrink-0">
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-[#00E08A] glow-nominal animate-pulse" />
           <span className="font-bold text-[#E6E9ED] tracking-wider text-xs">
-            PRIMARY CAMERA // FEED-01
+            PRIMARY CAMERA FEED 01
           </span>
           <span className="text-[10px] text-[#565C66]">
-            [1080p60 // SONY IMX477 MIPI-CSI2]
+            [1080p60 | SONY IMX477 MIPI-CSI2]
           </span>
         </div>
 
@@ -183,9 +198,11 @@ export function VideoCanvas() {
                   style={{ borderColor: box.color }}
                 />
 
-                {/* Box Tag Label with tight box-shadow glow */}
+                {/* Box Tag Label with tight box-shadow glow (right-aligned if on right half to prevent overflow clipping) */}
                 <div
-                  className={`absolute -top-5 left-0 px-1 py-0.5 text-[9px] font-mono font-bold tracking-tight whitespace-nowrap rounded-[1px] flex items-center gap-1 bezel-depth-subtle ${glowClass}`}
+                  className={`absolute -top-5 ${
+                    box.x > 50 ? "right-0" : "left-0"
+                  } px-1.5 py-0.5 text-[9px] font-mono font-bold tracking-tight whitespace-nowrap rounded-[1px] flex items-center gap-1.5 bezel-depth-subtle z-20 ${glowClass}`}
                   style={{
                     backgroundColor: "#12151A",
                     color: box.color,
@@ -193,11 +210,19 @@ export function VideoCanvas() {
                   }}
                 >
                   <span>{box.label}</span>
-                  <span className="opacity-75">
+                  <span className="opacity-80">
                     {(box.confidence * 100).toFixed(0)}%
                   </span>
-                  <span className="px-1 text-[8px] bg-[#1E232B] text-white rounded-[1px] border border-white/10">
-                    {box.status}
+                  <span
+                    className={`px-1 py-0.2 text-[8px] rounded-[1px] border font-bold uppercase shrink-0 ${
+                      box.status === "OUTSIDE"
+                        ? "bg-[#FFB020]/20 text-[#FFB020] border-[#FFB020]/50 glow-caution"
+                        : box.status === "HELD"
+                        ? "bg-[#4DA3FF]/20 text-[#4DA3FF] border-[#4DA3FF]/50 glow-info animate-pulse"
+                        : "bg-[#00E08A]/20 text-[#00E08A] border-[#00E08A]/50 glow-nominal"
+                    }`}
+                  >
+                    {box.status || "INSIDE"}
                   </span>
                 </div>
               </div>
@@ -245,6 +270,19 @@ export function VideoCanvas() {
           </div>
         </div>
 
+        {/* In-Panel HUD Alert Caption directly under State Box (Visible during alert, in --accent-critical) */}
+        {activeAlert?.active && (
+          <div
+            id="hud-causal-violation-caption"
+            className="absolute top-[84px] left-2.5 max-w-[500px] bg-[#1A0E10] border border-[#FF4D4F] px-2.5 py-1 rounded-[2px] bezel-depth font-mono text-[10px] text-[#FF4D4F] pointer-events-none flex items-center gap-1.5 shadow-2xl z-20"
+          >
+            <AlertTriangle className="w-3.5 h-3.5 text-[#FF4D4F] shrink-0" />
+            <span className="font-bold tracking-tight leading-tight uppercase" title={activeAlert.reason}>
+              {activeAlert.reason}
+            </span>
+          </div>
+        )}
+
         {/* Top-Right: Target Calibration */}
         <div className="absolute top-2.5 right-2.5 bg-[#0B0D10] bezel-depth border border-white/15 p-2 rounded-[2px] font-mono text-[9px] text-right pointer-events-none space-y-0.5 shadow-xl">
           <div className="text-[#8A919C]">STATION: ISS-COLUMBUS</div>
@@ -277,45 +315,30 @@ export function VideoCanvas() {
         <div className="scanline-overlay absolute inset-0 pointer-events-none opacity-20" />
       </div>
 
-      {/* Merged Single Bottom Stat Strip (Combines both prior strips into one compact 36px bar) */}
-      <div className="px-3 py-2 bg-[#12151A] bezel-depth-subtle border-t border-white/10 flex items-center justify-between font-mono text-[11px] text-[#8A919C] shrink-0 select-none overflow-x-auto">
-        <div className="flex items-center gap-4 shrink-0">
-          <div className="flex items-center gap-1.5">
-            <Clock className="w-3 h-3 text-[#565C66]" />
-            <span className="text-[10px] text-[#565C66]">DURATION:</span>
-            <span className="text-[#E6E9ED] font-bold">
-              {(frame.state_duration_ms / 1000).toFixed(1)}s
-            </span>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <Activity className="w-3 h-3 text-[#00E08A] glow-nominal" />
-            <span className="text-[10px] text-[#565C66]">KINEMATICS:</span>
-            <span className="text-[#00E08A] font-bold">
-              {frame.motion_energy} J
-            </span>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <Cpu className="w-3 h-3 text-[#4DA3FF] glow-info" />
-            <span className="text-[10px] text-[#565C66]">LATENCY:</span>
-            <span className="text-[#4DA3FF] font-bold">11.4 ms</span>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <ShieldCheck className="w-3 h-3 text-[#00E08A] glow-nominal" />
-            <span className="text-[10px] text-[#565C66]">CYCLES:</span>
-            <span className="text-[#E6E9ED] font-bold">#{cyclesCompleted}</span>
-          </div>
+      {/* Trimmed Bottom Stat Strip: ENERGY, LATENCY, CYCLES (Equally distributed, no dead empty space) */}
+      <div className="grid grid-cols-3 divide-x divide-white/10 bg-[#12151A] bezel-depth-subtle border-t border-white/10 py-2 font-mono text-xs select-none shrink-0">
+        <div className="flex items-center justify-center gap-2 px-3">
+          <Activity className="w-3.5 h-3.5 text-[#00E08A] glow-nominal shrink-0" />
+          <span className="text-[10px] text-[#565C66] tracking-wider uppercase">ENERGY:</span>
+          <span className="text-[#00E08A] font-bold tracking-tight">
+            {frame.motion_energy} J
+          </span>
         </div>
 
-        <div className="flex items-center gap-3 shrink-0 text-[10px]">
-          <span className="flex items-center gap-1 text-[#00E08A]">
-            <Shield className="w-3 h-3" />
-            <span>5 GATES ARMED</span>
+        <div className="flex items-center justify-center gap-2 px-3">
+          <Cpu className="w-3.5 h-3.5 text-[#4DA3FF] glow-info shrink-0" />
+          <span className="text-[10px] text-[#565C66] tracking-wider uppercase">LATENCY:</span>
+          <span className="text-[#4DA3FF] font-bold tracking-tight">
+            {frame.latency_ms.toFixed(1)} ms
           </span>
-          <span className="text-white/20">|</span>
-          <span className="text-[#4DA3FF]">CONTAINMENT 2.5D OK</span>
+        </div>
+
+        <div className="flex items-center justify-center gap-2 px-3">
+          <ShieldCheck className="w-3.5 h-3.5 text-[#00E08A] glow-nominal shrink-0" />
+          <span className="text-[10px] text-[#565C66] tracking-wider uppercase">CYCLES:</span>
+          <span className="text-[#E6E9ED] font-bold tracking-tight">
+            #{cyclesCompleted}
+          </span>
         </div>
       </div>
     </AvionicsPanel>

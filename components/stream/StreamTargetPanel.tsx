@@ -52,15 +52,14 @@ export function StreamTargetPanel() {
 
   return (
     <AvionicsPanel
-      title="STREAM TARGET // LINK HEALTH"
-      indexTag="04 // TELEMETRY LINK"
+      title="STREAM TARGET & LINK HEALTH"
       badge={getStatusBadge()}
       className="h-full flex flex-col justify-between overflow-hidden p-3"
     >
       {/* Target Config Instrument Row */}
       <div className="p-2.5 bg-[#171B21] border border-white/5 rounded-[2px] bezel-depth-subtle shrink-0 font-mono">
         <div className="flex items-center justify-between pb-1.5 border-b border-white/5 text-[9px] text-[#565C66] tracking-wider uppercase mb-2">
-          <span>UPLINK CONFIGURATION // INSTRUMENT BUS</span>
+          <span>UPLINK CONFIGURATION — INSTRUMENT BUS</span>
           <span>PROTOCOL: {streamConfig.protocol}</span>
         </div>
 
@@ -230,7 +229,7 @@ export function StreamTargetPanel() {
       <div className="p-2.5 bg-[#0E1015] border border-white/10 rounded-[2px] bezel-depth-subtle font-mono text-[9.5px] text-[#8A919C] shrink-0">
         <div className="flex items-center gap-1.5 text-[#E6E9ED] font-bold text-[10px] mb-1">
           <ShieldAlert className="w-3.5 h-3.5 text-[#4DA3FF]" />
-          <span>AUTONOMY CONTEXT // GROUND COMMUNICATIONS LATENCY</span>
+          <span>AUTONOMY CONTEXT: GROUND COMMUNICATIONS LATENCY</span>
         </div>
         <p className="leading-relaxed text-[#8A919C]">
           Orbital transit delay and communication blackouts prevent remote ground teleoperation.

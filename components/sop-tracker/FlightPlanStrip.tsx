@@ -10,23 +10,24 @@ export function FlightPlanStrip() {
   const {
     currentState,
     expectedNext,
-    confidence,
     cyclesCompleted,
     frame,
     containment,
     activeRejection,
     lastAcceptedState,
+    thresholds,
   } = useTelemetry();
 
   const currentIndex = useMemo(() => {
     return HAR_STATES.findIndex((s) => s.id === currentState);
   }, [currentState]);
 
-  // Real hold-time / stability progress toward the gate threshold (14 frames minimum)
+  // Real hold-time / stability progress toward the gate threshold (dynamic stabilityWindow)
   const activeGateProgress = useMemo(() => {
-    const rawProgress = (frame.stability_count / 14) * 100;
+    const target = thresholds?.stabilityWindow ?? 5;
+    const rawProgress = (frame.stability_count / target) * 100;
     return Math.min(100, Math.max(6, Math.round(rawProgress)));
-  }, [frame.stability_count]);
+  }, [frame.stability_count, thresholds?.stabilityWindow]);
 
   const getContainmentBadge = (stepId: HarState) => {
     if (stepId === "pick_red" || stepId === "place_red_out") {
@@ -81,7 +82,7 @@ export function FlightPlanStrip() {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
             <span className="font-mono text-[9px] text-[#565C66] tracking-wider uppercase">
-              02 // SIGNATURE SEQUENCE
+              SIGNATURE SEQUENCE
             </span>
             <span className="text-[#565C66] font-mono text-[10px]">|</span>
           </div>
@@ -97,17 +98,6 @@ export function FlightPlanStrip() {
             <span className="text-[#565C66]">EXPECTED:</span>
             <span className="text-[#4DA3FF] font-semibold">
               {expectedNext.toUpperCase()}
-            </span>
-          </div>
-
-          <div className="hidden sm:flex items-center gap-1 text-[11px] font-mono bg-[#171B21] px-2 py-0.5 rounded-[2px] border border-white/5">
-            <span className="text-[#565C66]">CONF:</span>
-            <span
-              className={`font-semibold ${
-                confidence >= 0.75 ? "text-[#00E08A]" : "text-[#FFB020]"
-              }`}
-            >
-              {(confidence * 100).toFixed(1)}%
             </span>
           </div>
         </div>
@@ -220,7 +210,7 @@ export function FlightPlanStrip() {
                         {step.id.toUpperCase()}
                       </span>
                       <span className="font-mono text-[8px] text-[#8A919C] tracking-tighter block truncate">
-                        {step.name.split("// ")[1] || step.id}
+                        {step.name}
                       </span>
                     </div>
                   </div>
@@ -304,7 +294,9 @@ export function FlightPlanStrip() {
         <div className="flex items-center gap-2 text-[#8A919C]">
           <span>RAIL TELEMETRY: 10Hz SYNC</span>
           <span className="text-[#343A46]">•</span>
-          <span>GATE HOLD: {frame.stability_count}/14 FRAMES</span>
+          <span>
+            GATE HOLD: {frame.stability_count}/{thresholds?.stabilityWindow ?? 5} FRAMES
+          </span>
         </div>
       </div>
     </div>

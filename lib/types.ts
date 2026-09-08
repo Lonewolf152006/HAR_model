@@ -41,6 +41,12 @@ export interface FsmBooleans {
   blue_placed_in: boolean;
 }
 
+export interface ActiveAlertState {
+  active: boolean;
+  reason: string;
+  timestamp: string;
+}
+
 export interface TelemetryFrame {
   frame_id: number;
   timestamp: string;
@@ -55,7 +61,8 @@ export interface TelemetryFrame {
   fsm: FsmBooleans;
   is_transition: boolean;
   transition_status: "nominal" | "rejected" | "alert";
-  active_alert: string | null;
+  active_alert: ActiveAlertState | null;
+  latency_ms: number;
   fps: number;
 }
 
@@ -124,7 +131,7 @@ export interface StreamEvent {
 export interface StreamTargetConfig {
   ip: string;
   port: string;
-  protocol: "WebRTC // RTP" | "RTSP // H.264" | "SRT // Low-Latency";
+  protocol: "WebRTC (RTP)" | "RTSP (H.264)" | "SRT (Low-Latency)";
 }
 
 export interface SignalQualityState {

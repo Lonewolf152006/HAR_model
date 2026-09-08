@@ -23,7 +23,7 @@ export default function Home() {
             </div>
           </div>
           <span className="px-2 py-0.5 text-[9px] font-semibold bg-[#171B21] text-[#00E08A] border border-[#00E08A]/40 glow-nominal rounded-[2px]">
-            ONLINE // NOMINAL
+            ONLINE: NOMINAL
           </span>
         </div>
 
@@ -44,7 +44,7 @@ export default function Home() {
           </div>
           <div className="flex justify-between">
             <span>HARDWARE TARGET:</span>
-            <span className="text-[#E6E9ED]">ISS-COLUMBUS // NODE-ALPHA</span>
+            <span className="text-[#E6E9ED]">ISS-COLUMBUS: NODE-ALPHA</span>
           </div>
           <div className="flex justify-between">
             <span>AI ENGINE:</span>

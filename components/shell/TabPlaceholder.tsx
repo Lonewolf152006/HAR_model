@@ -43,7 +43,7 @@ export function TabPlaceholder({
 
         <div className="text-right text-[10px] text-[#565C66] hidden sm:block">
           <div>SCHEDULED BUILD PRIORITY: {priorityStep}</div>
-          <div className="text-[#00E08A] font-semibold">ROUTER BUS OK // TELEMETRY SYNCED</div>
+          <div className="text-[#00E08A] font-semibold">ROUTER BUS OK | TELEMETRY SYNCED</div>
         </div>
       </div>
 
@@ -95,7 +95,7 @@ export function TabPlaceholder({
           </div>
 
           <div className="p-2.5 bg-[#171B21] border border-white/5 text-[10px] text-[#565C66]">
-            FRAME ID: #{frame.frame_id} // FPS: {frame.fps}
+            FRAME ID: #{frame.frame_id} | FPS: {frame.fps}
           </div>
         </div>
 

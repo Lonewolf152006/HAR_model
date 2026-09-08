@@ -19,6 +19,7 @@ import {
   NetworkBandwidthState,
   CameraSourceId,
   GateThresholds,
+  ActiveAlertState,
 } from "./types";
 import { HAR_STATES, GATE_THRESHOLDS, DEFAULT_GATE_THRESHOLDS } from "./constants";
 import { avionicsAudio } from "./sound";
@@ -69,14 +70,14 @@ export function useTelemetryStream() {
   const [streamConfig, setStreamConfig] = useState<StreamTargetConfig>({
     ip: "10.0.4.128",
     port: "8554",
-    protocol: "WebRTC // RTP",
+    protocol: "WebRTC (RTP)",
   });
   const [streamEvents, setStreamEvents] = useState<StreamEvent[]>([
     {
       id: "se-1",
       timestamp: "12:00:00.080",
       type: "CONFIG",
-      message: "Target endpoint armed: 10.0.4.128:8554 (WebRTC // RTP)",
+      message: "Target endpoint armed: 10.0.4.128:8554 (WebRTC RTP)",
     },
     {
       id: "se-2",
@@ -88,7 +89,7 @@ export function useTelemetryStream() {
       id: "se-3",
       timestamp: "12:00:01.040",
       type: "CONNECT",
-      message: "H.264 stream active // 1080p60 @ 14.8 Mbps // Sub-20ms",
+      message: "H.264 stream active | 1080p60 @ 14.8 Mbps | Sub-20ms",
     },
   ]);
   const [recordingState, setRecordingState] = useState<RecordingState>({
@@ -197,8 +198,8 @@ export function useTelemetryStream() {
       timestamp: "12:00:02.110",
       level: "ACCEPTED",
       state: "open_box",
-      reason: "STATE → open_box (conf 0.89) // All 5 DecisionStabilizer gates satisfied",
-      message: "STATE → open_box (conf 0.89) // All 5 DecisionStabilizer gates satisfied",
+      reason: "STATE → open_box (conf 0.89) | All 5 DecisionStabilizer gates satisfied",
+      message: "STATE → open_box (conf 0.89) | All 5 DecisionStabilizer gates satisfied",
       confidence: 0.89,
     },
     {
@@ -215,8 +216,8 @@ export function useTelemetryStream() {
       timestamp: "12:00:06.240",
       level: "ACCEPTED",
       state: "pick_red",
-      reason: "STATE → pick_red (conf 0.94) // All 5 DecisionStabilizer gates satisfied",
-      message: "STATE → pick_red (conf 0.94) // All 5 DecisionStabilizer gates satisfied",
+      reason: "STATE → pick_red (conf 0.94) | All 5 DecisionStabilizer gates satisfied",
+      message: "STATE → pick_red (conf 0.94) | All 5 DecisionStabilizer gates satisfied",
       confidence: 0.94,
     },
     {
@@ -230,8 +231,9 @@ export function useTelemetryStream() {
     },
   ]);
 
-  const [activeAlert, setActiveAlert] = useState<string | null>(null);
+  const [activeAlert, setActiveAlert] = useState<ActiveAlertState | null>(null);
   const [activeAnomaly, setActiveAnomaly] = useState<AnomalyType | null>(null);
+  const [inferenceLatency, setInferenceLatency] = useState<number>(11.4);
   const [activeRejection, setActiveRejection] = useState<{
     step: HarState;
     reason: string;
@@ -246,6 +248,10 @@ export function useTelemetryStream() {
   const frameCounterRef = useRef<number>(1042);
   const stateIndexRef = useRef<number>(0);
   const anomalyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const alertStartRef = useRef<number | null>(null);
+  const alertExpiryRef = useRef<number | null>(null);
+  const activeAlertRef = useRef<ActiveAlertState | null>(null);
+  const lastAlertFrameRef = useRef<number>(-1);
 
   const currentStateDef = HAR_STATES[stateIndex];
   const currentState = currentStateDef.id;
@@ -274,88 +280,129 @@ export function useTelemetryStream() {
     avionicsAudio.setMuted(isMuted);
   }, [isMuted]);
 
-  // Handle manual anomaly injection
-  const injectAnomaly = useCallback((type: AnomalyType) => {
-    setActiveAnomaly(type);
-    const now = new Date();
-    const timeStr = formatTimestamp(now);
+  // Cleanly clear active alert and stop siren
+  const clearAlert = useCallback(() => {
+    alertStartRef.current = null;
+    alertExpiryRef.current = null;
+    activeAlertRef.current = null;
+    setActiveAlert(null);
+    setActiveRejection(null);
+    avionicsAudio.stopAlertSiren();
+  }, []);
 
-    if (type === "out_of_sequence") {
-      setActiveAlert("OUT-OF-SEQUENCE: Illegal state skipped (FSM transition blocked)");
+  // Causal/FSM logic violation alert trigger (sustained 8-10s minimum hold, two-tone klaxon siren)
+  const triggerCausalViolation = useCallback(
+    (customReason?: string) => {
+      const now = Date.now();
+      const timeStr = formatTimestamp(new Date(now));
+      const reasonStr =
+        customReason || "Blocked: Red cube must be placed on exterior before picking blue";
+
+      const alertState: ActiveAlertState = {
+        active: true,
+        reason: reasonStr,
+        timestamp: timeStr,
+      };
+
+      // Set stable start time and 10-second minimum hold (never cleared before this expiry)
+      // If a second violation occurs while one is active, replaces text & timestamp, resets timer (no stacking)
+      alertStartRef.current = now;
+      alertExpiryRef.current = now + 10000;
+      activeAlertRef.current = alertState;
+
+      setActiveAlert(alertState);
       setActiveRejection({
         step: currentState,
-        reason: "Blocked: Red cube must be placed out before picking blue",
+        reason: reasonStr,
         timestamp: timeStr,
       });
-      avionicsAudio.playAlertTone();
-      avionicsAudio.speakVoiceAlert("Warning: Out of sequence activity detected.");
+
+      // Start repeating console klaxon siren (repeats every 1s, does not layer multiple sirens)
+      avionicsAudio.startAlertSiren();
+
+      // Push [ALERT] line to Black-Box Logs buffer (same buffer, no duplicate concept)
       appendLog({
         timestamp: timeStr,
         level: "ALERT",
         state: currentState,
-        reason: "OUT-OF-SEQUENCE: Illegal state skipped (FSM transition blocked)",
+        reason: reasonStr,
         confidence: 0.54,
       });
-      appendLog({
-        timestamp: timeStr,
-        level: "REJECTED",
-        state: currentState,
-        reason: "Blocked: Red cube must be placed out before picking blue",
-        confidence: 0.54,
-      });
-    } else if (type === "confidence_drop") {
-      setActiveAlert("GATE REJECTION: Confidence dropped below threshold (0.58 < 0.75)");
-      setActiveRejection({
-        step: currentState,
-        reason: "Low conf (0.58 < 0.75)",
-        timestamp: timeStr,
-      });
-      avionicsAudio.playRejectedTone();
-      appendLog({
-        timestamp: timeStr,
-        level: "REJECTED",
-        state: currentState,
-        reason: "GATE REJECTION: Low conf (0.58 < 0.75 threshold)",
-        confidence: 0.58,
-      });
-    } else if (type === "cooldown_violation") {
-      setActiveAlert("GATE REJECTION: Transition attempted within 1.4s cooldown window");
-      setActiveRejection({
-        step: currentState,
-        reason: "Cooldown active (0.6s < 1.4s)",
-        timestamp: timeStr,
-      });
-      avionicsAudio.playRejectedTone();
-      appendLog({
-        timestamp: timeStr,
-        level: "REJECTED",
-        state: currentState,
-        reason: "GATE REJECTION: Cooldown active (0.6s elapsed < 1.4s required)",
-        confidence: 0.86,
-      });
-    } else if (type === "motion_stall") {
-      setActiveAlert("GATE REJECTION: Insufficient kinematic velocity (static posture hallucination)");
-      setActiveRejection({
-        step: currentState,
-        reason: "Kinematic velocity stalled (<0.12 J)",
-        timestamp: timeStr,
-      });
-      avionicsAudio.playRejectedTone();
-      appendLog({
-        timestamp: timeStr,
-        level: "REJECTED",
-        state: currentState,
-        reason: "GATE REJECTION: Motion gate failed (kinematic energy 0.04 < 0.12 min)",
-        confidence: 0.81,
-      });
-    }
+    },
+    [currentState, appendLog]
+  );
 
-    if (anomalyTimeoutRef.current) clearTimeout(anomalyTimeoutRef.current);
-    anomalyTimeoutRef.current = setTimeout(() => {
-      setActiveAnomaly(null);
-      setActiveAlert(null);
-    }, 3200);
-  }, [currentState, appendLog]);
+  // Expose triggerCausalViolation to window for testing/verification
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      (window as unknown as { triggerCausalViolation?: (reason?: string) => void }).triggerCausalViolation =
+        triggerCausalViolation;
+    }
+  }, [triggerCausalViolation]);
+
+  // Handle manual anomaly injection (only out_of_sequence activates activeAlert; routine gate fails remain quiet)
+  const injectAnomaly = useCallback(
+    (type: AnomalyType) => {
+      setActiveAnomaly(type);
+      const now = new Date();
+      const timeStr = formatTimestamp(now);
+
+      if (type === "out_of_sequence") {
+        triggerCausalViolation("Blocked: Red cube must be placed on exterior before picking blue");
+      } else if (type === "confidence_drop") {
+        // Routine gate fail: quiet red FAIL badge, no activeAlert, no alert flash, no caption, no alert tone
+        setActiveRejection({
+          step: currentState,
+          reason: "Low conf (0.58 < 0.75)",
+          timestamp: timeStr,
+        });
+        avionicsAudio.playRejectedTone();
+        appendLog({
+          timestamp: timeStr,
+          level: "REJECTED",
+          state: currentState,
+          reason: "GATE REJECTION: Low conf (0.58 < 0.75 threshold)",
+          confidence: 0.58,
+        });
+      } else if (type === "cooldown_violation") {
+        // Routine gate fail: quiet red FAIL badge
+        setActiveRejection({
+          step: currentState,
+          reason: "Cooldown active (0.6s < 1.4s)",
+          timestamp: timeStr,
+        });
+        avionicsAudio.playRejectedTone();
+        appendLog({
+          timestamp: timeStr,
+          level: "REJECTED",
+          state: currentState,
+          reason: "GATE REJECTION: Cooldown active (0.6s elapsed < 1.4s required)",
+          confidence: 0.86,
+        });
+      } else if (type === "motion_stall") {
+        // Routine gate fail: quiet red FAIL badge
+        setActiveRejection({
+          step: currentState,
+          reason: "Kinematic velocity stalled (<0.12 J)",
+          timestamp: timeStr,
+        });
+        avionicsAudio.playRejectedTone();
+        appendLog({
+          timestamp: timeStr,
+          level: "REJECTED",
+          state: currentState,
+          reason: "GATE REJECTION: Motion gate failed (kinematic energy 0.04 < 0.12 min)",
+          confidence: 0.81,
+        });
+      }
+
+      if (anomalyTimeoutRef.current) clearTimeout(anomalyTimeoutRef.current);
+      anomalyTimeoutRef.current = setTimeout(() => {
+        setActiveAnomaly(null);
+      }, 3200);
+    },
+    [currentState, appendLog, triggerCausalViolation]
+  );
 
   // Main 10Hz simulation clock loop
   useEffect(() => {
@@ -379,6 +426,11 @@ export function useTelemetryStream() {
       }
 
       setConfidenceHistory((prev) => [...prev.slice(1), tickConf]);
+
+      // Update edge inference latency with realistic small continuous jitter (base 11.4ms, 8-15ms range, +/-1-3ms jitter @ 10Hz)
+      const latJitter = Math.sin(curFrame * 0.35) * 1.3 + Math.cos(curFrame * 0.77) * 0.8 + ((curFrame % 7) - 3) * 0.25;
+      const nextLatency = +(Math.max(8.5, Math.min(14.5, 11.4 + latJitter))).toFixed(1);
+      setInferenceLatency(nextLatency);
 
       // Advance local recording metrics if recording
       setRecordingState((prev) => {
@@ -414,8 +466,23 @@ export function useTelemetryStream() {
         };
       });
 
-      // Check if state is ready to advance normally
-      if (elapsedInState >= targetDuration && !activeAnomaly) {
+      // Rare simulated Causal / FSM logic violation (~every 65s at 10Hz, e.g. illegal attempt during pick_red)
+      if (
+        curFrame > 1042 &&
+        (curFrame - 1042) % 650 === 180 &&
+        lastAlertFrameRef.current !== curFrame
+      ) {
+        lastAlertFrameRef.current = curFrame;
+        triggerCausalViolation("Blocked: Red cube must be placed on exterior before picking blue");
+      }
+
+      // Check alert hold state against stable wall-clock start/expiry
+      // 8-10s minimum hold (10.0s), OR until next accepted transition, whichever is LONGER
+      const isAlertHolding =
+        alertExpiryRef.current !== null && now < alertExpiryRef.current;
+
+      // Check if state is ready to advance normally (held while alert minimum hold is active)
+      if (elapsedInState >= targetDuration && !activeAnomaly && !isAlertHolding) {
         // Transition to next state
         const nextIdx = (stateIndexRef.current + 1) % HAR_STATES.length;
         const acceptedState = HAR_STATES[nextIdx].id;
@@ -430,14 +497,18 @@ export function useTelemetryStream() {
         // Audio & Log for accepted step
         avionicsAudio.playAcceptedTone();
         setLastAcceptedState(acceptedState);
-        setActiveRejection(null);
+
+        // If alert minimum duration has elapsed, transition completes the hold and clears the alert
+        if (alertExpiryRef.current !== null && now >= alertExpiryRef.current) {
+          clearAlert();
+        }
 
         const stepConf = +(0.88 + Math.random() * 0.08).toFixed(2);
         appendLog({
           timestamp: timeStr,
           level: "ACCEPTED",
           state: acceptedState,
-          reason: `STATE → ${acceptedState} (conf ${stepConf}) // All 5 DecisionStabilizer gates satisfied`,
+          reason: `STATE → ${acceptedState} (conf ${stepConf}) | All 5 DecisionStabilizer gates satisfied`,
           confidence: stepConf,
         });
 
@@ -471,11 +542,14 @@ export function useTelemetryStream() {
           });
           avionicsAudio.playCycleCompleteChime();
         }
+      } else if (alertExpiryRef.current !== null && now >= alertExpiryRef.current + 3000) {
+        // Fallback safeguard: if state is resting and >13s have elapsed without a transition, clear alert
+        clearAlert();
       }
     }, 100);
 
     return () => clearInterval(interval);
-  }, [isPaused, activeAnomaly]);
+  }, [isPaused, activeAnomaly, triggerCausalViolation, clearAlert]);
 
   // Derive realistic frame telemetry
   const timeStr = formatTimestamp(new Date());
@@ -496,28 +570,22 @@ export function useTelemetryStream() {
     motionEnergy = 0.04;
   }
 
-  // Derive Containment status from state
+  // Derive Containment status from state (Single Source of Truth for Bounding Boxes and Cards)
   const containment: ContainmentState = {
     red_box:
       currentState === "pick_red"
         ? "HELD"
-        : currentState === "place_red_out" ||
-          currentState === "pick_blue" ||
-          currentState === "place_blue_in"
-          ? "OUTSIDE"
-          : "INSIDE",
+        : currentState === "idle" || currentState === "open_box"
+        ? "INSIDE"
+        : "OUTSIDE",
     blue_box:
       currentState === "pick_blue"
         ? "HELD"
-        : currentState === "place_blue_in" || currentState === "close_box"
-          ? "INSIDE"
-          : "INSIDE",
+        : "INSIDE",
     main_box:
-      currentState === "idle"
+      currentState === "idle" || currentState === "close_box"
         ? "CLOSED"
-        : currentState === "close_box"
-          ? "CLOSED"
-          : "OPEN",
+        : "OPEN",
   };
 
   // Derive FSM Booleans
@@ -538,7 +606,7 @@ export function useTelemetryStream() {
       : timeSinceTransSec >= thresholds.cooldown;
   const isMotionPass =
     currentState === "idle" ? true : motionEnergy >= thresholds.motionFloor;
-  const isCausalPass = activeAnomaly !== "out_of_sequence";
+  const isCausalPass = activeAnomaly !== "out_of_sequence" && !activeAlert?.active;
 
   const gates: GateResults = {
     confidence: {
@@ -587,66 +655,49 @@ export function useTelemetryStream() {
       passed: isCausalPass,
       reason: isCausalPass
         ? "FSM sequence consistent"
-        : "Illegal sequence transition blocked by causal graph",
+        : (activeAlert?.reason || "Illegal sequence transition blocked by causal graph"),
       value: isCausalPass ? "VALID" : "VIOLATION",
       threshold: "STRICT_ORDER",
     },
   };
 
-  // Dynamic 2.5D bounding boxes tracking physical experiment state
+  // Dynamic 2.5D bounding boxes tracking physical experiment state (status locked to containment)
   const boundingBoxes: BoundingBox[] = useMemo(() => {
     let redX = 26;
     let redY = 52;
-    let redStatus = "INSIDE";
-
     let blueX = 39;
     let blueY = 52;
-    let blueStatus = "INSIDE";
-
-    let mainBoxStatus = "OPEN";
 
     if (currentState === "idle") {
-      mainBoxStatus = "CLOSED";
       redX = 27;
       redY = 54;
       blueX = 40;
       blueY = 54;
     } else if (currentState === "open_box") {
-      mainBoxStatus = "LATCH_OPEN";
       redX = 27;
       redY = 52;
       blueX = 40;
       blueY = 52;
     } else if (currentState === "pick_red") {
-      mainBoxStatus = "OPEN";
       redX = 46;
       redY = 38;
-      redStatus = "HELD";
+      blueX = 40;
+      blueY = 52;
     } else if (currentState === "place_red_out") {
-      mainBoxStatus = "OPEN";
       redX = 72;
       redY = 50;
-      redStatus = "OUTSIDE";
+      blueX = 40;
+      blueY = 52;
     } else if (currentState === "pick_blue") {
-      mainBoxStatus = "OPEN";
       redX = 72;
-      redStatus = "OUTSIDE";
+      redY = 50;
       blueX = 46;
       blueY = 38;
-      blueStatus = "HELD";
-    } else if (currentState === "place_blue_in") {
-      mainBoxStatus = "OPEN";
+    } else if (currentState === "place_blue_in" || currentState === "close_box") {
       redX = 72;
-      redStatus = "OUTSIDE";
+      redY = 50;
       blueX = 28;
       blueY = 52;
-      blueStatus = "INSIDE";
-    } else if (currentState === "close_box") {
-      mainBoxStatus = "CLOSED";
-      redX = 72;
-      redStatus = "OUTSIDE";
-      blueX = 28;
-      blueStatus = "INSIDE";
     }
 
     return [
@@ -659,7 +710,7 @@ export function useTelemetryStream() {
         w: 38,
         h: 44,
         color: "#4DA3FF",
-        status: mainBoxStatus,
+        status: containment.main_box,
       },
       {
         id: "red_box",
@@ -670,7 +721,7 @@ export function useTelemetryStream() {
         w: 12,
         h: 15,
         color: "#FF4D4F",
-        status: redStatus,
+        status: containment.red_box,
       },
       {
         id: "blue_box",
@@ -681,10 +732,10 @@ export function useTelemetryStream() {
         w: 12,
         h: 15,
         color: "#00E08A",
-        status: blueStatus,
+        status: containment.blue_box,
       },
     ];
-  }, [currentState, frameId]);
+  }, [currentState, containment, frameId]);
 
   const frame: TelemetryFrame = {
     frame_id: frameId,
@@ -699,12 +750,13 @@ export function useTelemetryStream() {
     containment,
     fsm,
     is_transition: currentElapsed < 300,
-    transition_status: activeAlert
+    transition_status: activeAlert?.active
       ? "alert"
       : !isConfidencePass || !isCooldownPass || !isMotionPass
         ? "rejected"
         : "nominal",
     active_alert: activeAlert,
+    latency_ms: inferenceLatency,
     fps: 59.8,
   };
 
@@ -714,8 +766,15 @@ export function useTelemetryStream() {
     stateStartRef.current = Date.now();
     lastTransitionRef.current = Date.now() - 3000;
     stabilityCounterRef.current = 15;
-    setActiveAlert(null);
+    clearAlert();
     setActiveAnomaly(null);
+  }, [clearAlert]);
+
+  // Clean up siren on unmount
+  useEffect(() => {
+    return () => {
+      avionicsAudio.stopAlertSiren();
+    };
   }, []);
 
   const toggleStreamConnect = useCallback(() => {
@@ -728,7 +787,7 @@ export function useTelemetryStream() {
           id: `se-${Date.now()}`,
           timestamp: timeStr,
           type: "DISCONNECT",
-          message: "Stream link severed by operator // Carrier dropped",
+          message: "Stream link severed by operator | Carrier dropped",
         },
         ...prev.slice(0, 3),
       ]);
@@ -758,7 +817,7 @@ export function useTelemetryStream() {
             id: `se-${Date.now()}`,
             timestamp: formatTimestamp(new Date()),
             type: "CONNECT",
-            message: `Stream locked: ${streamConfig.protocol} @ 14.8 Mbps // Link nominal`,
+            message: `Stream locked: ${streamConfig.protocol} @ 14.8 Mbps | Link nominal`,
           },
           ...prev.slice(0, 3),
         ]);
@@ -809,6 +868,7 @@ export function useTelemetryStream() {
     logs,
     cyclesCompleted,
     subsystems,
+    inferenceLatency,
     isPaused,
     setIsPaused,
     isMuted,
@@ -816,6 +876,7 @@ export function useTelemetryStream() {
     isReducedMotion,
     setIsReducedMotion,
     injectAnomaly,
+    triggerCausalViolation,
     resetSimulation,
     activeAlert,
     activeRejection,

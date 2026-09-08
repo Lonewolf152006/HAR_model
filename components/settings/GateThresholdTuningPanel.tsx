@@ -97,7 +97,7 @@ function TuningSliderRow({
 
       {/* Engineering Consequence Note */}
       <div className="text-[8.5px] text-[#8A919C] leading-snug border-t border-white/5 pt-1">
-        <span className="text-[#565C66] mr-1">// IMPACT:</span>
+        <span className="text-[#565C66] mr-1">IMPACT:</span>
         <span>{consequenceNote}</span>
       </div>
     </div>
@@ -109,8 +109,7 @@ export function GateThresholdTuningPanel() {
 
   return (
     <AvionicsPanel
-      title="DECISION STABILIZER // GATE THRESHOLD TUNING"
-      indexTag="05 // CALIBRATION"
+      title="DECISION STABILIZER GATE TUNING"
       badge={
         <span className="px-2 py-0.5 font-mono text-[9px] font-bold rounded-[2px] border bg-[#4DA3FF]/10 text-[#4DA3FF] border-[#4DA3FF]/50 glow-info flex items-center gap-1">
           <Sliders className="w-2.5 h-2.5" />

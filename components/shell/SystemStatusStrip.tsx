@@ -1,53 +1,82 @@
 "use client";
 
-import React, { useState } from "react";
-import { SubsystemStatusMap, SubsystemHealth } from "@/lib/types";
+import React, { useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
+import { useTelemetry } from "@/context/TelemetryContext";
+import { SubsystemHealth } from "@/lib/types";
 
-interface SystemStatusStripProps {
-  subsystems: SubsystemStatusMap;
-}
-
-interface SubsystemMeta {
-  key: keyof SubsystemStatusMap;
-  label: string;
-  nominalDesc: string;
-  degradedDesc: string;
-  faultDesc: string;
-}
-
-const SUBSYSTEMS_META: SubsystemMeta[] = [
-  {
-    key: "camera",
-    label: "CAMERA",
-    nominalDesc: "Sony IMX477 // 1080p60 // Exposure: 1/120s // FPS: 59.9",
-    degradedDesc: "Dropped frames detected // FPS: 28.4",
-    faultDesc: "Video link lost // MIPI CSI-2 bus offline",
-  },
-  {
-    key: "tar_model",
-    label: "TAR MODEL",
-    nominalDesc: "BiLSTM+Attention // Latency: 11.2ms // Weight checksum: OK",
-    degradedDesc: "Inference latency spike > 45ms",
-    faultDesc: "Model execution fault // Tensor memory error",
-  },
-  {
-    key: "yolo",
-    label: "YOLO",
-    nominalDesc: "YOLOv8-Nano TensorRT // 3 classes tracked // IoU: 0.88",
-    degradedDesc: "Bounding box jitter / Low IoU match",
-    faultDesc: "Detector process crashed",
-  },
-  {
-    key: "stream",
-    label: "STREAM",
-    nominalDesc: "WebRTC RTSP Sink // 192.168.1.140:8554 // Bitrate: 4.2 Mbps",
-    degradedDesc: "Bandwidth throttling active // Buffer: 85%",
-    faultDesc: "Sink unreachable // Connection timed out",
-  },
-];
-
-export function SystemStatusStrip({ subsystems }: SystemStatusStripProps) {
+export function SystemStatusStrip() {
+  const { isPaused, recordingState, streamStatus, streamConfig } = useTelemetry();
   const [hoveredKey, setHoveredKey] = useState<string | null>(null);
+  const [pillRect, setPillRect] = useState<DOMRect | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Update rect on scroll or resize if hovered
+  const updateRect = useCallback(() => {
+    if (hoveredKey) {
+      const el = document.getElementById(`subsystem-pill-${hoveredKey}`);
+      if (el) {
+        setPillRect(el.getBoundingClientRect());
+      }
+    }
+  }, [hoveredKey]);
+
+  useEffect(() => {
+    if (!hoveredKey) return;
+    window.addEventListener("scroll", updateRect, true);
+    window.addEventListener("resize", updateRect);
+    return () => {
+      window.removeEventListener("scroll", updateRect, true);
+      window.removeEventListener("resize", updateRect);
+    };
+  }, [hoveredKey, updateRect]);
+
+  // Derive real camera health from frame ingestion and recording state
+  const cameraHealth: SubsystemHealth = isPaused
+    ? "fault"
+    : recordingState.isRecording
+    ? "nominal"
+    : "degraded";
+
+  const cameraDesc = isPaused
+    ? "Video ingestion paused | Sensor bus standby"
+    : recordingState.isRecording
+    ? "Sony IMX477 | 1080p60 | MIPI CSI-2 | Receiving frames (REC active)"
+    : "Sony IMX477 | 1080p60 | MIPI CSI-2 | Standby preview";
+
+  // Derive real stream health from active stream connection state
+  const streamHealth: SubsystemHealth =
+    streamStatus === "CONNECTED"
+      ? "nominal"
+      : streamStatus === "RECONNECTING"
+      ? "degraded"
+      : "fault";
+
+  const streamDesc =
+    streamStatus === "CONNECTED"
+      ? `${streamConfig.protocol} | ${streamConfig.ip}:${streamConfig.port} | 14.8 Mbps | Link nominal`
+      : streamStatus === "RECONNECTING"
+      ? `Re-negotiating WebRTC SDP with ${streamConfig.ip}:${streamConfig.port}...`
+      : "Ground uplink severed | Carrier offline | NVRAM primary";
+
+  const items = [
+    {
+      key: "camera",
+      label: "CAMERA",
+      health: cameraHealth,
+      desc: cameraDesc,
+    },
+    {
+      key: "stream",
+      label: "STREAM",
+      health: streamHealth,
+      desc: streamDesc,
+    },
+  ];
 
   const getStatusStyle = (health: SubsystemHealth) => {
     switch (health) {
@@ -78,66 +107,106 @@ export function SystemStatusStrip({ subsystems }: SystemStatusStripProps) {
     }
   };
 
+  // Position-independent viewport placement calculation
+  const getTooltipStyle = (rect: DOMRect) => {
+    const tooltipWidth = 260;
+    const margin = 12;
+    const top = rect.bottom + 6;
+
+    // If aligning to pill's left edge would overflow the right viewport boundary,
+    // align the tooltip's right edge to the pill's right edge.
+    let left = rect.left;
+    if (left + tooltipWidth > window.innerWidth - margin) {
+      left = rect.right - tooltipWidth;
+    }
+
+    // Strictly clamp within viewport boundaries so clipping is mathematically impossible
+    left = Math.max(margin, Math.min(left, window.innerWidth - tooltipWidth - margin));
+
+    return {
+      top: `${top}px`,
+      left: `${left}px`,
+      width: `${tooltipWidth}px`,
+    };
+  };
+
+  const activeItem = items.find((it) => it.key === hoveredKey);
+  const activeStyle = activeItem ? getStatusStyle(activeItem.health) : null;
+
   return (
-    <div className="flex items-center gap-1.5 bg-[#12151A] bezel-depth-subtle border border-white/10 p-1 rounded-[2px]">
-      {SUBSYSTEMS_META.map((sub) => {
-        const health = subsystems[sub.key] || "nominal";
-        const styles = getStatusStyle(health);
-        const isHovered = hoveredKey === sub.key;
+    <>
+      <div className="flex items-center gap-1.5 bg-[#12151A] bezel-depth-subtle border border-white/10 p-1 rounded-[2px]">
+        {items.map((sub) => {
+          const styles = getStatusStyle(sub.health);
 
-        const description =
-          health === "nominal"
-            ? sub.nominalDesc
-            : health === "degraded"
-            ? sub.degradedDesc
-            : sub.faultDesc;
-
-        return (
-          <div
-            key={sub.key}
-            className="relative"
-            onMouseEnter={() => setHoveredKey(sub.key)}
-            onMouseLeave={() => setHoveredKey(null)}
-          >
+          return (
             <div
-              className={`flex items-center gap-1.5 px-2 py-1 rounded-[2px] transition-colors cursor-help border ${styles.border} bg-[#171B21] hover:bg-[#1E232B]`}
+              key={sub.key}
+              id={`subsystem-pill-${sub.key}`}
+              className="relative"
+              onMouseEnter={(e) => {
+                setPillRect(e.currentTarget.getBoundingClientRect());
+                setHoveredKey(sub.key);
+              }}
+              onMouseLeave={() => {
+                setHoveredKey(null);
+                setPillRect(null);
+              }}
             >
-              {/* Status Dot with tight box-shadow glow */}
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${styles.dotBg} ${styles.glow} ${
-                  health === "nominal" ? "animate-status-pulse" : "animate-ping"
-                }`}
-              />
-              <span className="font-mono text-[11px] font-medium tracking-wider text-[#8A919C]">
-                {sub.label}
-              </span>
-            </div>
-
-            {/* Flight Telemetry Tooltip */}
-            {isHovered && (
-              <div className="absolute top-full mt-1.5 left-0 z-50 w-64 p-2 bg-[#171B21] bezel-depth border border-white/20 shadow-xl rounded-[2px] pointer-events-none">
-                <div className="flex items-center justify-between pb-1 mb-1 border-b border-white/10 font-mono text-[10px]">
-                  <span className="font-bold text-[#E6E9ED]">{sub.label} SUBSYSTEM</span>
-                  <span
-                    className={`font-semibold ${
-                      health === "nominal"
-                        ? "text-[#00E08A]"
-                        : health === "degraded"
-                        ? "text-[#FFB020]"
-                        : "text-[#FF4D4F]"
-                    }`}
-                  >
-                    [{styles.statusTag}]
-                  </span>
-                </div>
-                <p className="font-mono text-[11px] text-[#8A919C] leading-snug">
-                  {description}
-                </p>
+              <div
+                className={`flex items-center gap-1.5 px-2 py-1 rounded-[2px] transition-all duration-150 cursor-help border ${styles.border} bg-[#171B21] hover:bg-[#1E232B] hover:border-white/30`}
+              >
+                {/* Status Dot with tight box-shadow glow */}
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${styles.dotBg} ${styles.glow} ${
+                    sub.health === "nominal"
+                      ? "animate-status-pulse"
+                      : sub.health === "degraded"
+                      ? "animate-pulse"
+                      : "animate-ping"
+                  }`}
+                />
+                <span className="font-mono text-[11px] font-medium tracking-wider text-[#8A919C]">
+                  {sub.label}
+                </span>
               </div>
-            )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Flight Telemetry Tooltip via Portal (Escapes any ancestor overflow, clipping, or z-index constraints) */}
+      {mounted && activeItem && activeStyle && pillRect && createPortal(
+        <div
+          style={{
+            position: "fixed",
+            ...getTooltipStyle(pillRect),
+            zIndex: 9999,
+          }}
+          className="p-2 bg-[#171B21] bezel-depth border border-white/20 shadow-2xl rounded-[2px] pointer-events-none font-mono select-none animate-in fade-in-50 duration-100"
+        >
+          <div className="flex items-center justify-between pb-1 mb-1 border-b border-white/10 text-[10px]">
+            <span className="font-bold text-[#E6E9ED]">
+              {activeItem.label} SUBSYSTEM
+            </span>
+            <span
+              className={`font-semibold ${
+                activeItem.health === "nominal"
+                  ? "text-[#00E08A]"
+                  : activeItem.health === "degraded"
+                  ? "text-[#FFB020]"
+                  : "text-[#FF4D4F]"
+              }`}
+            >
+              [{activeStyle.statusTag}]
+            </span>
           </div>
-        );
-      })}
-    </div>
+          <p className="text-[10.5px] text-[#8A919C] leading-snug">
+            {activeItem.desc}
+          </p>
+        </div>,
+        document.body
+      )}
+    </>
   );
 }

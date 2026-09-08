@@ -68,7 +68,7 @@ export function BootSequence({ onComplete, forceReplay = false }: BootSequencePr
         <div className="flex items-center gap-3">
           <span className="w-2.5 h-2.5 bg-[#00E08A] animate-ping" />
           <span className="text-xs uppercase tracking-widest text-[#E6E9ED] font-bold">
-            ORBITAL-HAR // AVIONICS SYSTEM INITIALIZATION
+            ORBITAL-HAR — AVIONICS SYSTEM INITIALIZATION
           </span>
         </div>
         <button
@@ -82,9 +82,9 @@ export function BootSequence({ onComplete, forceReplay = false }: BootSequencePr
       {/* Terminal Lines Container */}
       <div className="flex-1 my-8 space-y-2.5 overflow-y-auto max-w-3xl relative z-10">
         <div className="text-[11px] text-[#565C66] mb-4">
-          BIO-ASTRONAUTICS RESEARCH PAYLOAD // FLIGHT FIRMWARE REV 4.2.1
+          BIO-ASTRONAUTICS RESEARCH PAYLOAD — FLIGHT FIRMWARE REV 4.2.1
           <br />
-          MEMORY: 16384 MB ALLOCATED // COLD START VECTOR 0x8004
+          MEMORY: 16384 MB ALLOCATED | COLD START VECTOR 0x8004
         </div>
 
         {BOOT_SEQUENCE_LINES.slice(0, visibleCount).map((line, idx) => {

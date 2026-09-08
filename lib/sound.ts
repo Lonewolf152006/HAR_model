@@ -22,8 +22,14 @@ class AvionicsSoundSystem {
     return this.ctx;
   }
 
+  private sirenInterval: NodeJS.Timeout | null = null;
+  private currentSirenNodes: { osc: OscillatorNode; gain: GainNode }[] = [];
+
   public setMuted(muted: boolean) {
     this.isMuted = muted;
+    if (muted) {
+      this.stopAlertSiren();
+    }
   }
 
   public getMuted(): boolean {
@@ -130,33 +136,84 @@ class AvionicsSoundSystem {
   }
 
   /**
-   * Alert tone: sharp attention beep
+   * Start sustained two-tone console alarm siren:
+   * Repeating 2-3 alternating tone pulses (920Hz -> 700Hz -> 920Hz)
+   * Repeats every 1000ms until stopAlertSiren() is called or system is muted.
+   * If already running, does NOT stack/layer multiple sirens.
+   */
+  public startAlertSiren() {
+    if (this.isMuted) return;
+    // Prevent overlapping/stacking multiple sirens
+    if (this.sirenInterval) return;
+
+    const playSirenBurst = () => {
+      if (this.isMuted) {
+        this.stopAlertSiren();
+        return;
+      }
+      const ctx = this.getContext();
+      if (!ctx) return;
+
+      try {
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        // Authentic industrial avionics two-tone square wave
+        osc.type = "square";
+        osc.frequency.setValueAtTime(920, now);
+        osc.frequency.setValueAtTime(700, now + 0.12);
+        osc.frequency.setValueAtTime(920, now + 0.24);
+
+        // Crisp envelope for the 3 alternating pulses (total ~360ms tone, 640ms rest)
+        gain.gain.setValueAtTime(0.07, now);
+        gain.gain.setValueAtTime(0.07, now + 0.36);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.40);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.41);
+
+        this.currentSirenNodes.push({ osc, gain });
+        setTimeout(() => {
+          this.currentSirenNodes = this.currentSirenNodes.filter((n) => n.osc !== osc);
+        }, 450);
+      } catch {
+        // AudioContext might be restricted before interaction
+      }
+    };
+
+    // Play first burst immediately
+    playSirenBurst();
+    // Repeat every 1.0s in sync with visual alert pulse
+    this.sirenInterval = setInterval(playSirenBurst, 1000);
+  }
+
+  /**
+   * Immediately stops the repeating alert siren and cuts any ringing tone.
+   */
+  public stopAlertSiren() {
+    if (this.sirenInterval) {
+      clearInterval(this.sirenInterval);
+      this.sirenInterval = null;
+    }
+    for (const node of this.currentSirenNodes) {
+      try {
+        node.gain.gain.setValueAtTime(0, 0);
+        node.osc.stop();
+        node.osc.disconnect();
+      } catch {}
+    }
+    this.currentSirenNodes = [];
+  }
+
+  /**
+   * Play alert: triggers repeating siren
    */
   public playAlertTone() {
-    if (this.isMuted) return;
-    const ctx = this.getContext();
-    if (!ctx) return;
-
-    try {
-      const now = ctx.currentTime;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.type = "square";
-      osc.frequency.setValueAtTime(950, now);
-      osc.frequency.setValueAtTime(700, now + 0.08);
-
-      gain.gain.setValueAtTime(0.06, now);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      osc.start(now);
-      osc.stop(now + 0.19);
-    } catch {
-      // Ignore
-    }
+    this.startAlertSiren();
   }
 
   /**

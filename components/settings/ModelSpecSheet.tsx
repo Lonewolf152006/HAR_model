@@ -10,7 +10,7 @@ export function ModelSpecSheet() {
     { label: "MODEL ARCHITECTURE", value: "BiLSTM + Multi-Head Self-Attention (2-layer, 128 hidden)" },
     { label: "ACTION CLASSES (7)", value: "idle, open_box, pick_red, place_red_out, pick_blue, place_blue_in, close_box" },
     { label: "OBJECT DETECTOR", value: "YOLOv8-Nano (custom 3-class bounding: box, red, blue)" },
-    { label: "POSE ESTIMATION", value: "MediaPipe BlazePose (33 keypoints // 2.5D normalized)" },
+    { label: "POSE ESTIMATION", value: "MediaPipe BlazePose (33 keypoints | 2.5D normalized)" },
     { label: "WEIGHTS FILENAME", value: "best_tar_model.pth (SHA256: 9f8a...c10e)" },
     { label: "TEMPORAL WINDOW", value: "32 frames @ 10Hz sampling (3.2s receptive field)" },
     { label: "EDGE INFERENCE", value: "11.4 ms @ FP16 TensorRT (NVIDIA Jetson Orin NX target)" },
@@ -19,8 +19,7 @@ export function ModelSpecSheet() {
 
   return (
     <AvionicsPanel
-      title="NEURAL PIPELINE // MODEL SPEC SHEET"
-      indexTag="05 // ARCHITECTURE SPEC"
+      title="NEURAL PIPELINE SPEC SHEET"
       className="h-full flex flex-col justify-between p-3 font-mono"
     >
       <div className="flex flex-col h-full justify-between">

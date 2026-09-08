@@ -55,7 +55,6 @@ export function ConfidenceSparkline({
   return (
     <AvionicsPanel
       title="CONFIDENCE SPARKLINE"
-      indexTag="02 // TELEMETRY"
       badge={
         <div className="flex items-center gap-1.5 font-mono text-[10px]">
           {isPassing ? (
