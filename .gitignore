@@ -1,0 +1,45 @@
+# Environments & Python virtualenvs
+venv/
+.venv/
+env/
+ENV/
+*.env
+
+# Python cache & build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Pipeline frame extractions & large image dumps
+yolo_pipeline/raw_frames/
+yolo_pipeline/annotated/
+yolo_pipeline/dataset/
+yolo_pipeline/runs/
+tar_pipeline/raw_clips/
+tar_pipeline/annotated_clips/
+
+# Data quarantine & feedback logs
+dataset_quarantine/
+feedback_data/
+*.log
+
+# Model backups
+*_backup.pth
+best_tar_model1.pth
+
+# Reports & exports
+test_reports/*.json
+test_reports/*.png
+dataset_clean_report.*
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Output test recordings
+output_*.mp4
