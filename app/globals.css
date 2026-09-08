@@ -1,0 +1,281 @@
+@import "tailwindcss";
+
+:root {
+  --bg-primary: #0B0D10;
+  --bg-panel: #12151A;
+  --bg-panel-raised: #171B21;
+  --border-hairline: rgba(255, 255, 255, 0.08);
+  --border-active: rgba(255, 255, 255, 0.16);
+
+  --text-primary: #E6E9ED;
+  --text-secondary: #8A919C;
+  --text-dim: #565C66;
+
+  --accent-nominal: #00E08A;
+  --accent-caution: #FFB020;
+  --accent-critical: #FF4D4F;
+  --accent-info: #4DA3FF;
+  --accent-neutral: #565C66;
+}
+
+@theme {
+  --color-bg-primary: var(--bg-primary);
+  --color-bg-panel: var(--bg-panel);
+  --color-bg-panel-raised: var(--bg-panel-raised);
+  --color-border-hairline: var(--border-hairline);
+  --color-border-active: var(--border-active);
+
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-dim: var(--text-dim);
+
+  --color-nominal: var(--accent-nominal);
+  --color-caution: var(--accent-caution);
+  --color-critical: var(--accent-critical);
+  --color-info: var(--accent-info);
+  --color-neutral: var(--accent-neutral);
+
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, monospace;
+  --font-sans: var(--font-inter), system-ui, -apple-system, sans-serif;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
+  letter-spacing: -0.01em;
+}
+
+/* 2-3% Film-Grain / Noise Overlay Across Viewport */
+.film-grain {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
+
+/* 3-4% Technical Blueprint / Circuit-Trace Grid */
+.technical-blueprint-bg {
+  background-color: var(--bg-primary);
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    radial-gradient(circle 1px at 0 0, rgba(255, 255, 255, 0.06) 1px, transparent 0);
+  background-size: 32px 32px, 32px 32px, 64px 64px;
+}
+
+/* Subtle Raised-Bezel Depth: Inset Top Highlight + Soft Bottom Shadow */
+.bezel-depth {
+  box-shadow: 
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.09),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.6),
+    0 2px 6px -1px rgba(0, 0, 0, 0.7);
+}
+.bezel-depth-subtle {
+  box-shadow: 
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.06),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.4),
+    0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* Tight Semantic-Colored Glows (Box-Shadow, Not Blur) */
+.glow-nominal {
+  box-shadow: 0 0 0 1px rgba(0, 224, 138, 0.5), 0 0 4px rgba(0, 224, 138, 0.65);
+}
+.glow-caution {
+  box-shadow: 0 0 0 1px rgba(255, 176, 32, 0.5), 0 0 4px rgba(255, 176, 32, 0.65);
+}
+.glow-critical {
+  box-shadow: 0 0 0 1px rgba(255, 77, 79, 0.5), 0 0 4px rgba(255, 77, 79, 0.7);
+}
+.glow-info {
+  box-shadow: 0 0 0 1px rgba(77, 163, 255, 0.5), 0 0 4px rgba(77, 163, 255, 0.65);
+}
+
+/* State Change Brief Snap Pulse */
+@keyframes stateGlowSnap {
+  0% { transform: scale(1); filter: brightness(1); }
+  35% { transform: scale(1.18); filter: brightness(1.7); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+.animate-glow-snap {
+  animation: stateGlowSnap 280ms cubic-bezier(0.2, 0, 0.2, 1);
+}
+
+/* Flight Plan Node Stamp Flash on Accept (150ms hard-edged snap) */
+@keyframes stampFlash {
+  0% { background-color: var(--accent-nominal); color: #0B0D10; box-shadow: 0 0 0 2px var(--accent-nominal); }
+  50% { background-color: var(--accent-nominal); color: #0B0D10; box-shadow: 0 0 0 2px var(--accent-nominal); }
+  100% { background-color: #171B21; color: var(--accent-nominal); }
+}
+.animate-stamp-flash {
+  animation: stampFlash 160ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Flight Plan Node Reject Pulse (2 short sharp pulses) */
+@keyframes rejectPulse {
+  0%, 100% { border-color: var(--accent-critical); box-shadow: 0 0 0 1px rgba(255, 77, 79, 0.7); }
+  25%, 75% { border-color: transparent; box-shadow: none; }
+  50% { border-color: var(--accent-critical); box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.9); }
+}
+.animate-reject-pulse {
+  animation: rejectPulse 320ms cubic-bezier(0.4, 0, 0.2, 1) 2;
+}
+
+/* Functional Lens-Vignette Edge Mask for Video Panel */
+.lens-vignette {
+  box-shadow: inset 0 0 32px 12px rgba(7, 8, 11, 0.75);
+}
+
+/* Functional Rack-Focus Background Blur when Alert / Modal is Active */
+.rack-focus-blur {
+  filter: blur(2.5px) brightness(0.65);
+  transition: filter 220ms cubic-bezier(0.4, 0, 0.2, 1), opacity 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+
+/* Avionics Flight Scrollbars */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: #0B0D10;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 1px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+/* Hairline border helper utilities */
+.border-hairline {
+  border-color: var(--border-hairline);
+}
+.border-active {
+  border-color: var(--border-active);
+}
+
+/* CRT scanline overlay */
+.scanline-overlay {
+  background: linear-gradient(
+    rgba(18, 21, 26, 0) 50%, 
+    rgba(0, 0, 0, 0.35) 50%
+  );
+  background-size: 100% 3px;
+  pointer-events: none;
+}
+
+/* Subtle CRT flicker / flash for boot sequence */
+@keyframes crtFlash {
+  0% { opacity: 0; }
+  30% { opacity: 0.9; background-color: rgba(255, 255, 255, 0.85); }
+  60% { opacity: 0.4; }
+  100% { opacity: 0; }
+}
+.animate-crt-flash {
+  animation: crtFlash 260ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Radar Sweep Keyframe */
+@keyframes radarSweep {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-radar-sweep {
+  animation: radarSweep 4s linear infinite;
+}
+
+/* Bracket Button hover style */
+.btn-bracket {
+  font-family: var(--font-jetbrains-mono), monospace;
+  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.btn-bracket::before {
+  content: "[ ";
+  opacity: 0.45;
+  transition: opacity 150ms ease, color 150ms ease;
+}
+.btn-bracket::after {
+  content: " ]";
+  opacity: 0.45;
+  transition: opacity 150ms ease, color 150ms ease;
+}
+.btn-bracket:hover::before,
+.btn-bracket:hover::after {
+  opacity: 1;
+  color: var(--accent-nominal);
+}
+
+/* Animated Equalizer Waveform for Voice TTS Alert */
+@keyframes equalizerPulse {
+  0%, 100% { height: 3px; opacity: 0.5; }
+  50% { height: 14px; opacity: 1; }
+}
+.animate-wave-1 { animation: equalizerPulse 0.5s ease-in-out infinite; }
+.animate-wave-2 { animation: equalizerPulse 0.75s ease-in-out infinite 0.15s; }
+.animate-wave-3 { animation: equalizerPulse 0.45s ease-in-out infinite 0.3s; }
+.animate-wave-4 { animation: equalizerPulse 0.65s ease-in-out infinite 0.1s; }
+
+/* Avionics Instrument Range Slider */
+.avionics-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  background: transparent;
+  outline: none;
+  cursor: ew-resize;
+  margin: 6px 0;
+}
+
+.avionics-slider::-webkit-slider-runnable-track {
+  width: 100%;
+  height: 6px;
+  background: transparent;
+  border-radius: 2px;
+}
+
+.avionics-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 16px;
+  margin-top: -5px;
+  background: #E6E9ED;
+  border: 1px solid #4DA3FF;
+  border-radius: 2px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 1px 3px rgba(0, 0, 0, 0.6);
+  cursor: ew-resize;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.avionics-slider:active::-webkit-slider-thumb,
+.avionics-slider:hover::-webkit-slider-thumb {
+  background: #4DA3FF;
+  box-shadow: 0 0 8px rgba(77, 163, 255, 0.85);
+}
+
+.avionics-slider::-moz-range-thumb {
+  width: 10px;
+  height: 16px;
+  background: #E6E9ED;
+  border: 1px solid #4DA3FF;
+  border-radius: 2px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 1px 3px rgba(0, 0, 0, 0.6);
+  cursor: ew-resize;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.avionics-slider:active::-moz-range-thumb,
+.avionics-slider:hover::-moz-range-thumb {
+  background: #4DA3FF;
+  box-shadow: 0 0 8px rgba(77, 163, 255, 0.85);
+}
