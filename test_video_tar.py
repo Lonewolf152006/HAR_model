@@ -76,6 +76,31 @@ from realtime import (
     MOTION_THRESHOLD,
 )
 
+# ==============================================================================
+# 🎬 [VIDEO CONFIGURATION] - PASTE YOUR VIDEO PATH HERE
+# ==============================================================================
+# Simply paste the path to your video inside the quotes below!
+#
+# Examples:
+#   VIDEO_PATH = r"videos/1.mp4"
+#   VIDEO_PATH = r"C:\Users\Vedant\Videos\my_recording.mp4"
+#
+# Tip: On Windows, you can right-click any video -> "Copy as path",
+# and simply paste it directly inside the quotes!
+# ==============================================================================
+VIDEO_PATH = r"videos/1.mp4"
+
+
+def clean_path(path_str):
+    """Cleans up paths pasted with quotes on Windows (e.g. "C:\\path\\video.mp4")."""
+    if not path_str:
+        return ""
+    p = str(path_str).strip()
+    if (p.startswith('"') and p.endswith('"')) or (p.startswith("'") and p.endswith("'")):
+        p = p[1:-1].strip()
+    return p
+
+
 # Color palette for classes (BGR)
 CLASS_COLORS = {
     "idle": (140, 140, 140),          # Gray
@@ -926,15 +951,32 @@ def main():
 
     args = parser.parse_args()
 
-    video_path = args.video
+    # 1. First priority: CLI argument (--video)
+    video_path = clean_path(args.video)
+
+    # 2. Second priority: VIDEO_PATH set in code at line ~90
+    if not video_path and VIDEO_PATH:
+        cleaned = clean_path(VIDEO_PATH)
+        if os.path.isabs(cleaned) and os.path.exists(cleaned):
+            video_path = cleaned
+        elif os.path.exists(os.path.join(PROJECT_ROOT, cleaned)):
+            video_path = os.path.join(PROJECT_ROOT, cleaned)
+        elif os.path.exists(cleaned):
+            video_path = os.path.abspath(cleaned)
+        else:
+            print(f"[WARN] File specified in VIDEO_PATH not found: '{VIDEO_PATH}'")
+
+    # 3. Fallback: Auto-detect available video in videos/
     if not video_path:
         candidates = find_test_videos()
         if not candidates:
-            print("[ERROR] No video file specified and no candidate videos found in 'videos/' or project directory.")
-            print("        Please provide a video via: python test_video_tar.py --video path/to/video.mp4")
+            print("[ERROR] No video specified and no video found in 'videos/' or project folder.")
+            print("        Open test_video_tar.py and paste your video path at VIDEO_PATH (line 90).")
             return
         video_path = candidates[0]
-        print(f"[AUTO] No video specified. Auto-selected available video: {video_path}")
+        print(f"[AUTO] Auto-selected available video: {video_path}")
+    else:
+        print(f"[VIDEO] Selected video: {video_path}")
 
     run_test(
         video_path=video_path,
