@@ -15,7 +15,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ORBITAL-HAR — Avionics Telemetry Console",
+  title: "ASTROFLOW AI — Avionics Telemetry Console",
   description: "Mission Control Telemetry & Human Activity Recognition System for Microgravity Operations",
 };
 

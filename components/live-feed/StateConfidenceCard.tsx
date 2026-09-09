@@ -188,7 +188,6 @@ export function StateConfidenceCard({
             {/* Rolling Buffer Indicator Footer */}
             <div className="flex items-center justify-between px-1 text-[8px] text-[#565C66]">
               <span>T -5.0s (50 SAMPLES @ 10Hz)</span>
-              <span>LIVE</span>
             </div>
           </div>
         </div>

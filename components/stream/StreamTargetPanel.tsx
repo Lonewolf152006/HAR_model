@@ -59,7 +59,7 @@ export function StreamTargetPanel() {
       {/* Target Config Instrument Row */}
       <div className="p-2.5 bg-[#171B21] border border-white/5 rounded-[2px] bezel-depth-subtle shrink-0 font-mono">
         <div className="flex items-center justify-between pb-1.5 border-b border-white/5 text-[9px] text-[#565C66] tracking-wider uppercase mb-2">
-          <span>UPLINK CONFIGURATION — INSTRUMENT BUS</span>
+          <span>UPLINK CONFIGURATION</span>
           <span>PROTOCOL: {streamConfig.protocol}</span>
         </div>
 
@@ -131,7 +131,6 @@ export function StreamTargetPanel() {
       <div className="p-2.5 bg-[#171B21] border border-white/5 rounded-[2px] bezel-depth-subtle shrink-0 my-2 font-mono">
         <div className="flex items-center justify-between pb-1.5 border-b border-white/5 text-[9px] text-[#565C66] tracking-wider uppercase mb-2">
           <span>HARDWARE RF / CARRIER HEALTH</span>
-          <span>DISCRETE 6-SEGMENT BUS</span>
         </div>
 
         {/* 6 Discrete Horizontal Indicator Segments */}
@@ -196,7 +195,6 @@ export function StreamTargetPanel() {
       <div className="p-2.5 bg-[#171B21] border border-white/5 rounded-[2px] bezel-depth-subtle shrink-0 mb-2 font-mono">
         <div className="flex items-center justify-between pb-1 border-b border-white/5 text-[8.5px] text-[#565C66] tracking-wider uppercase mb-1.5">
           <span>CARRIER LINK EVENTS (LAST 3 CYCLES)</span>
-          <span>FIFO BUFFER</span>
         </div>
 
         <div className="space-y-1 text-[10px]">

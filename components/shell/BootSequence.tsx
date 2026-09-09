@@ -68,7 +68,7 @@ export function BootSequence({ onComplete, forceReplay = false }: BootSequencePr
         <div className="flex items-center gap-3">
           <span className="w-2.5 h-2.5 bg-[#00E08A] animate-ping" />
           <span className="text-xs uppercase tracking-widest text-[#E6E9ED] font-bold">
-            ORBITAL-HAR — AVIONICS SYSTEM INITIALIZATION
+            ASTROFLOW AI — AVIONICS SYSTEM INITIALIZATION
           </span>
         </div>
         <button

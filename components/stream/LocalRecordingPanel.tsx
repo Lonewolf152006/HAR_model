@@ -130,7 +130,6 @@ export function LocalRecordingPanel() {
             <HardDrive className="w-3 h-3 text-[#8A919C]" />
             <span>NVRAM SOLID STATE STORAGE</span>
           </div>
-          <span>SLOT 01 : PARTITION B</span>
         </div>
 
         {/* File Path & Current Size */}

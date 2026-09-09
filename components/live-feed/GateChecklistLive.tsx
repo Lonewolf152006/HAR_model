@@ -101,7 +101,6 @@ export function GateChecklistLive({ gates }: GateChecklistLiveProps) {
           <ShieldCheck className="w-3 h-3 text-[#00E08A] glow-nominal" />
           <span>ARMED AT 10Hz</span>
         </span>
-        <span className="text-[#565C66]">5-GATE VERIFICATION</span>
       </div>
     </AvionicsPanel>
   );

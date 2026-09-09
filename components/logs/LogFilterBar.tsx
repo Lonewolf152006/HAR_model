@@ -54,12 +54,12 @@ export function LogFilterBar({
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `orbital_har_blackbox_${timestamp}.json`;
+      link.download = `astroflow_ai_blackbox_${timestamp}.json`;
       link.click();
       URL.revokeObjectURL(url);
     } else {
       const lines = [
-        "# ORBITAL-HAR Flight Recorder Black-Box Log Export",
+        "# ASTROFLOW AI Flight Recorder Black-Box Log Export",
         `Exported At: ${new Date().toISOString()}`,
         `Total Log Lines: ${logs.length}`,
         "",
@@ -78,7 +78,7 @@ export function LogFilterBar({
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `orbital_har_blackbox_${timestamp}.md`;
+      link.download = `astroflow_ai_blackbox_${timestamp}.md`;
       link.click();
       URL.revokeObjectURL(url);
     }

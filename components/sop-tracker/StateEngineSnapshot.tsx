@@ -143,8 +143,7 @@ export function StateEngineSnapshot() {
       {/* Single-Line 5-Gate Pass/Fail Summary Strip */}
       <div className="flex flex-col space-y-1 mt-2">
         <div className="flex items-center justify-between font-mono text-[8px] text-[#565C66]">
-          <span>DECISION STABILIZER GATES (SINGLE-STRIP)</span>
-          <span>THRESHOLD PASS</span>
+          <span>DECISION STABILIZER GATES</span>
         </div>
 
         {/* 5 horizontal compact chips */}

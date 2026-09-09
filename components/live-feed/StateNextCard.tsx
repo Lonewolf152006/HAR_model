@@ -65,7 +65,6 @@ export function StateNextCard({
         <div className="p-2 bg-[#171B21] bezel-depth-subtle border border-white/5 rounded-[2px]">
           <div className="flex items-center justify-between text-[9px] text-[#565C66] uppercase mb-1">
             <span>Next Expected Sequence</span>
-            <span className="text-[#4DA3FF] font-semibold">PREDICTED</span>
           </div>
           <div className="flex items-center gap-2 text-xs font-semibold text-[#E6E9ED]">
             <ArrowRight className="w-3.5 h-3.5 text-[#4DA3FF] glow-info shrink-0" />

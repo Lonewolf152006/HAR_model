@@ -35,10 +35,7 @@ export function Sidebar() {
           </div>
           <div className="flex flex-col">
             <span className="font-mono text-xs font-bold tracking-wider text-[#E6E9ED]">
-              ORBITAL-HAR
-            </span>
-            <span className="font-mono text-[9px] tracking-widest text-[#565C66]">
-              AVIONICS CONSOLE v4.2
+              ASTROFLOW AI
             </span>
           </div>
         </div>

@@ -15,7 +15,7 @@ export default function Home() {
             </div>
             <div>
               <div className="text-xs font-bold tracking-wider text-[#E6E9ED]">
-                ORBITAL-HAR
+                ASTROFLOW AI
               </div>
               <div className="text-[10px] text-[#565C66]">
                 BIO-ASTRONAUTICS RESEARCH DIVISION
