@@ -66,7 +66,7 @@ export interface TelemetryFrame {
   fps: number;
 }
 
-export type LogLevel = "ACCEPTED" | "REJECTED" | "ALERT" | "INFO";
+export type LogLevel = "ACCEPTED" | "REJECTED" | "ALERT" | "CONTAINMENT" | "INFO";
 
 export interface LogEntry {
   id: string;

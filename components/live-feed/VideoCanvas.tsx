@@ -277,7 +277,7 @@ export function VideoCanvas() {
             className="absolute top-[84px] left-2.5 max-w-[500px] bg-[#1A0E10] border border-[#FF4D4F] px-2.5 py-1 rounded-[2px] bezel-depth font-mono text-[10px] text-[#FF4D4F] pointer-events-none flex items-center gap-1.5 shadow-2xl z-20"
           >
             <AlertTriangle className="w-3.5 h-3.5 text-[#FF4D4F] shrink-0" />
-            <span className="font-bold tracking-tight leading-tight uppercase" title={activeAlert.reason}>
+            <span className="font-bold tracking-tight leading-tight" title={activeAlert.reason}>
               {activeAlert.reason}
             </span>
           </div>

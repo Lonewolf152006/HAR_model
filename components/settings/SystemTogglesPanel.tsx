@@ -16,7 +16,7 @@ export function SystemTogglesPanel() {
 
   return (
     <AvionicsPanel
-      title="SYSTEM PREFERENCES & AVIONICS BUS"
+      title="SYSTEM PREFERENCES"
       className="p-3 font-mono flex flex-col justify-between"
     >
       <div className="space-y-2">
@@ -80,10 +80,10 @@ export function SystemTogglesPanel() {
             </div>
             <div>
               <div className="text-[10px] font-bold text-[#E6E9ED]">
-                DYNAMIC RADAR & PULSE MOTION
+                UI ALERT PULSE & FLASH ANIMATIONS
               </div>
               <div className="text-[8.5px] text-[#8A919C]">
-                High-rate CSS animations, radar sweeps & stamp flashes
+                Suppresses high-rate border flashing and alert strobes on Live Feed
               </div>
             </div>
           </div>
@@ -109,11 +109,7 @@ export function SystemTogglesPanel() {
       </div>
 
       {/* Utility Action: Replay Boot Sequence */}
-      <div className="pt-2 mt-2 border-t border-white/5 flex items-center justify-between">
-        <span className="text-[8.5px] text-[#565C66]">
-          DIAGNOSTIC UTILITY: CRT TERMINAL LOADER
-        </span>
-
+      <div className="pt-2 mt-2 border-t border-white/5 flex items-center justify-end">
         <button
           type="button"
           onClick={replayBootSequence}

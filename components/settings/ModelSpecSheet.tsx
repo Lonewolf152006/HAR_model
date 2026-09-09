@@ -54,7 +54,6 @@ export function ModelSpecSheet() {
             <Database className="w-2.5 h-2.5" />
             <span>IN-MEMORY CHECKPOINT LOADED</span>
           </span>
-          <span>STATIONARY VALIDATED</span>
         </div>
       </div>
     </AvionicsPanel>

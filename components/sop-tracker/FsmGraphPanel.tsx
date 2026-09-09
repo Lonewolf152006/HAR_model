@@ -105,7 +105,7 @@ export function FsmGraphPanel() {
           <span>CAUSAL ENFORCED</span>
         </div>
       }
-      className="h-full flex flex-col justify-between overflow-hidden p-2.5"
+      className="h-full flex flex-col overflow-hidden p-3 pb-3.5"
     >
       {/* Mini Directed Graph Diagram */}
       <div className="relative w-full h-[115px] bg-[#0E1015] border border-white/5 rounded-[2px] bezel-depth-subtle flex items-center justify-center overflow-hidden shrink-0">
@@ -223,14 +223,14 @@ export function FsmGraphPanel() {
       </div>
 
       {/* Compact FSM Boolean Readout Table */}
-      <div className="flex-1 flex flex-col justify-end mt-2 space-y-1">
-        <div className="flex items-center justify-between pb-1 border-b border-white/5 font-mono text-[8px] text-[#565C66] tracking-wider">
+      <div className="flex-1 min-h-0 flex flex-col mt-2.5 space-y-1">
+        <div className="flex items-center justify-between pb-1.5 border-b border-white/5 font-mono text-[8px] text-[#565C66] tracking-wider shrink-0">
           <span>FSM STATE REGISTER</span>
           <span>ASSERTION</span>
           <span>VALUE</span>
         </div>
 
-        <div className="space-y-1 overflow-y-auto max-h-[125px] pr-0.5">
+        <div className="flex-1 min-h-0 space-y-1 overflow-y-auto pr-1 pb-1">
           {fsmItems.map((item) => (
             <div
               key={item.key}

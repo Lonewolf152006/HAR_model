@@ -52,30 +52,10 @@ export function StateEngineSnapshot() {
     { key: "motion", label: "MOTN", gate: gates.motion },
   ] as const;
 
-  const allGatesPass = Object.values(gates).every((g) => g.passed);
-
   return (
     <AvionicsPanel
       title="STATE ENGINE SNAPSHOT"
-      badge={
-        <div className="flex items-center gap-1 font-mono text-[9px]">
-          <span
-            className={`w-1.5 h-1.5 rounded-[1px] ${
-              allGatesPass
-                ? "bg-[#00E08A] glow-nominal animate-pulse"
-                : "bg-[#FF4D4F] glow-critical"
-            }`}
-          />
-          <span
-            className={`font-bold ${
-              allGatesPass ? "text-[#00E08A]" : "text-[#FF4D4F]"
-            }`}
-          >
-            {allGatesPass ? "5/5 GATES ARMED" : "GATE REJECT"}
-          </span>
-        </div>
-      }
-      className="h-full flex flex-col justify-between overflow-hidden p-2.5"
+      className="h-full flex flex-col justify-between overflow-hidden p-3 pb-3.5"
     >
       {/* Sparkline Numeric Readout + Compact Graph */}
       <div className="flex flex-col space-y-1 shrink-0">
@@ -200,7 +180,7 @@ export function StateEngineSnapshot() {
       </div>
 
       {/* Dwell / Motion Kinematics Telemetry Strip */}
-      <div className="flex items-center justify-between pt-1.5 border-t border-white/5 font-mono text-[8.5px] text-[#8A919C] shrink-0">
+      <div className="flex items-center justify-between pt-2 pb-1 border-t border-white/5 font-mono text-[8.5px] text-[#8A919C] shrink-0 mb-0.5">
         <div className="flex items-center gap-1">
           <Activity className="w-3 h-3 text-[#4DA3FF]" />
           <span>DWELL: {(frame.state_duration_ms / 1000).toFixed(1)}s</span>

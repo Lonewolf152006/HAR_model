@@ -93,6 +93,9 @@ export const DEFAULT_GATE_THRESHOLDS: GateThresholds = {
   motionFloor: 0.12,
 };
 
+export const CAUSAL_VIOLATION_REASON =
+  "BLOCKED: Red cube must be placed on exterior before picking blue";
+
 export const CAMERA_SOURCES: CameraSourceConfig[] = [
   {
     id: "primary",

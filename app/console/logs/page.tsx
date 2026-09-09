@@ -16,6 +16,7 @@ export default function LogsPage() {
       ACCEPTED: logs.filter((l) => l.level === "ACCEPTED").length,
       REJECTED: logs.filter((l) => l.level === "REJECTED").length,
       ALERT: logs.filter((l) => l.level === "ALERT").length,
+      CONTAINMENT: logs.filter((l) => l.level === "CONTAINMENT").length,
       INFO: logs.filter((l) => l.level === "INFO").length,
     };
   }, [logs]);

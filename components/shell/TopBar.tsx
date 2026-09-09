@@ -31,7 +31,7 @@ export function TopBar() {
       {activeAlert?.active && (
         <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-[#1A0E10] border border-[#FF4D4F]/60 rounded-[2px] bezel-depth-subtle animate-pulse">
           <span className="w-2 h-2 rounded-full bg-[#FF4D4F] glow-critical" />
-          <span className="font-mono text-xs font-bold text-[#FF4D4F] tracking-wide uppercase">
+          <span className="font-mono text-xs font-bold text-[#FF4D4F] tracking-wide">
             {activeAlert.reason}
           </span>
         </div>

@@ -21,7 +21,7 @@ import {
   GateThresholds,
   ActiveAlertState,
 } from "./types";
-import { HAR_STATES, GATE_THRESHOLDS, DEFAULT_GATE_THRESHOLDS } from "./constants";
+import { HAR_STATES, GATE_THRESHOLDS, DEFAULT_GATE_THRESHOLDS, CAUSAL_VIOLATION_REASON } from "./constants";
 import { avionicsAudio } from "./sound";
 
 function formatTimestamp(date: Date): string {
@@ -198,32 +198,41 @@ export function useTelemetryStream() {
       timestamp: "12:00:02.110",
       level: "ACCEPTED",
       state: "open_box",
-      reason: "STATE → open_box (conf 0.89) | All 5 DecisionStabilizer gates satisfied",
-      message: "STATE → open_box (conf 0.89) | All 5 DecisionStabilizer gates satisfied",
+      reason: "STATE → open_box (conf 0.89)",
+      message: "STATE → open_box (conf 0.89)",
       confidence: 0.89,
     },
     {
       id: "log-init-8",
       timestamp: "12:00:02.115",
-      level: "INFO",
+      level: "CONTAINMENT",
       state: "open_box",
       reason: "CONTAINMENT: Main Stowage Box latch released [OPEN]",
       message: "CONTAINMENT: Main Stowage Box latch released [OPEN]",
       confidence: 0.99,
     },
     {
+      id: "log-init-8b",
+      timestamp: "12:00:04.820",
+      level: "REJECTED",
+      state: "open_box",
+      reason: "GATE REJECTION: Low conf (0.68 < 0.75 threshold) — candidate 'pick_red' held",
+      message: "GATE REJECTION: Low conf (0.68 < 0.75 threshold) — candidate 'pick_red' held",
+      confidence: 0.68,
+    },
+    {
       id: "log-init-9",
       timestamp: "12:00:06.240",
       level: "ACCEPTED",
       state: "pick_red",
-      reason: "STATE → pick_red (conf 0.94) | All 5 DecisionStabilizer gates satisfied",
-      message: "STATE → pick_red (conf 0.94) | All 5 DecisionStabilizer gates satisfied",
+      reason: "STATE → pick_red (conf 0.94)",
+      message: "STATE → pick_red (conf 0.94)",
       confidence: 0.94,
     },
     {
       id: "log-init-10",
       timestamp: "12:00:06.245",
-      level: "INFO",
+      level: "CONTAINMENT",
       state: "pick_red",
       reason: "CONTAINMENT: Red Cube [Sample-A] grasp confirmed [HELD]",
       message: "CONTAINMENT: Red Cube [Sample-A] grasp confirmed [HELD]",
@@ -247,11 +256,14 @@ export function useTelemetryStream() {
   const stabilityCounterRef = useRef<number>(18);
   const frameCounterRef = useRef<number>(1042);
   const stateIndexRef = useRef<number>(0);
+  const cyclesCompletedRef = useRef<number>(3);
   const anomalyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const alertStartRef = useRef<number | null>(null);
   const alertExpiryRef = useRef<number | null>(null);
   const activeAlertRef = useRef<ActiveAlertState | null>(null);
   const lastAlertFrameRef = useRef<number>(-1);
+  const lastRejectionFrameRef = useRef<number>(-1);
+  const rejectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const currentStateDef = HAR_STATES[stateIndex];
   const currentState = currentStateDef.id;
@@ -295,8 +307,7 @@ export function useTelemetryStream() {
     (customReason?: string) => {
       const now = Date.now();
       const timeStr = formatTimestamp(new Date(now));
-      const reasonStr =
-        customReason || "Blocked: Red cube must be placed on exterior before picking blue";
+      const reasonStr = customReason || CAUSAL_VIOLATION_REASON;
 
       const alertState: ActiveAlertState = {
         active: true,
@@ -348,7 +359,7 @@ export function useTelemetryStream() {
       const timeStr = formatTimestamp(now);
 
       if (type === "out_of_sequence") {
-        triggerCausalViolation("Blocked: Red cube must be placed on exterior before picking blue");
+        triggerCausalViolation(CAUSAL_VIOLATION_REASON);
       } else if (type === "confidence_drop") {
         // Routine gate fail: quiet red FAIL badge, no activeAlert, no alert flash, no caption, no alert tone
         setActiveRejection({
@@ -473,7 +484,45 @@ export function useTelemetryStream() {
         lastAlertFrameRef.current !== curFrame
       ) {
         lastAlertFrameRef.current = curFrame;
-        triggerCausalViolation("Blocked: Red cube must be placed on exterior before picking blue");
+        triggerCausalViolation(CAUSAL_VIOLATION_REASON);
+      }
+
+      // Occasional simulated routine DecisionStabilizer gate rejection (~every 45s at 10Hz, quiet hold, soft tone)
+      if (
+        curFrame > 1042 &&
+        (curFrame - 1042) % 450 === 270 &&
+        lastRejectionFrameRef.current !== curFrame &&
+        !activeAlertRef.current?.active &&
+        !activeAnomaly
+      ) {
+        lastRejectionFrameRef.current = curFrame;
+        const timeStr = formatTimestamp(new Date());
+        const isConfFail = curFrame % 2 === 0;
+        const rejReason = isConfFail
+          ? `GATE REJECTION: Low conf (0.67 < ${thresholds.confidence} threshold) — candidate held`
+          : `GATE REJECTION: Kinematic velocity stalled (0.07 < ${thresholds.motionFloor} min) — candidate held`;
+        const rejBadge = isConfFail
+          ? `Low conf (0.67 < ${thresholds.confidence})`
+          : `Velocity stalled (0.07 < ${thresholds.motionFloor})`;
+
+        setActiveRejection({
+          step: currentState,
+          reason: rejBadge,
+          timestamp: timeStr,
+        });
+        avionicsAudio.playRejectedTone();
+        appendLog({
+          timestamp: timeStr,
+          level: "REJECTED",
+          state: currentState,
+          reason: rejReason,
+          confidence: isConfFail ? 0.67 : +(0.80 + Math.random() * 0.05).toFixed(2),
+        });
+
+        if (rejectionTimeoutRef.current) clearTimeout(rejectionTimeoutRef.current);
+        rejectionTimeoutRef.current = setTimeout(() => {
+          setActiveRejection((prev) => (prev?.reason === rejBadge ? null : prev));
+        }, 3200);
       }
 
       // Check alert hold state against stable wall-clock start/expiry
@@ -497,6 +546,7 @@ export function useTelemetryStream() {
         // Audio & Log for accepted step
         avionicsAudio.playAcceptedTone();
         setLastAcceptedState(acceptedState);
+        setActiveRejection(null);
 
         // If alert minimum duration has elapsed, transition completes the hold and clears the alert
         if (alertExpiryRef.current !== null && now >= alertExpiryRef.current) {
@@ -508,37 +558,36 @@ export function useTelemetryStream() {
           timestamp: timeStr,
           level: "ACCEPTED",
           state: acceptedState,
-          reason: `STATE → ${acceptedState} (conf ${stepConf}) | All 5 DecisionStabilizer gates satisfied`,
+          reason: `STATE → ${acceptedState} (conf ${stepConf})`,
           confidence: stepConf,
         });
 
         // Specific containment log for state transition
         if (acceptedState === "open_box") {
-          appendLog({ timestamp: timeStr, level: "INFO", state: acceptedState, reason: "CONTAINMENT: Main Stowage Box latch released [OPEN]", confidence: 0.99 });
+          appendLog({ timestamp: timeStr, level: "CONTAINMENT", state: acceptedState, reason: "CONTAINMENT: Main Stowage Box latch released [OPEN]", confidence: 0.99 });
         } else if (acceptedState === "pick_red") {
-          appendLog({ timestamp: timeStr, level: "INFO", state: acceptedState, reason: "CONTAINMENT: Red Cube [Sample-A] grasp confirmed [HELD]", confidence: 0.95 });
+          appendLog({ timestamp: timeStr, level: "CONTAINMENT", state: acceptedState, reason: "CONTAINMENT: Red Cube [Sample-A] grasp confirmed [HELD]", confidence: 0.95 });
         } else if (acceptedState === "place_red_out") {
-          appendLog({ timestamp: timeStr, level: "INFO", state: acceptedState, reason: "CONTAINMENT: Red Cube [Sample-A] deposited on exterior workbench [OUTSIDE]", confidence: 0.96 });
+          appendLog({ timestamp: timeStr, level: "CONTAINMENT", state: acceptedState, reason: "CONTAINMENT: Red Cube [Sample-A] deposited on exterior workbench [OUTSIDE]", confidence: 0.96 });
         } else if (acceptedState === "pick_blue") {
-          appendLog({ timestamp: timeStr, level: "INFO", state: acceptedState, reason: "CONTAINMENT: Blue Cube [Sample-B] grasp confirmed [HELD]", confidence: 0.93 });
+          appendLog({ timestamp: timeStr, level: "CONTAINMENT", state: acceptedState, reason: "CONTAINMENT: Blue Cube [Sample-B] grasp confirmed [HELD]", confidence: 0.93 });
         } else if (acceptedState === "place_blue_in") {
-          appendLog({ timestamp: timeStr, level: "INFO", state: acceptedState, reason: "CONTAINMENT: Blue Cube [Sample-B] inserted into stowage interior [INSIDE]", confidence: 0.97 });
+          appendLog({ timestamp: timeStr, level: "CONTAINMENT", state: acceptedState, reason: "CONTAINMENT: Blue Cube [Sample-B] inserted into stowage interior [INSIDE]", confidence: 0.97 });
         } else if (acceptedState === "close_box") {
-          appendLog({ timestamp: timeStr, level: "INFO", state: acceptedState, reason: "CONTAINMENT: Main Stowage Box lid engaged and sealed [CLOSED]", confidence: 0.99 });
+          appendLog({ timestamp: timeStr, level: "CONTAINMENT", state: acceptedState, reason: "CONTAINMENT: Main Stowage Box lid engaged and sealed [CLOSED]", confidence: 0.99 });
         }
 
         // If cycle completed
         if (nextIdx === 0) {
-          setCyclesCompleted((c) => {
-            const nextCycle = c + 1;
-            appendLog({
-              timestamp: timeStr,
-              level: "INFO",
-              state: "idle",
-              reason: `SOP Full Cycle Completed #${nextCycle} — All containment restowed`,
-              confidence: 0.98,
-            });
-            return nextCycle;
+          cyclesCompletedRef.current += 1;
+          const nextCycle = cyclesCompletedRef.current;
+          setCyclesCompleted(nextCycle);
+          appendLog({
+            timestamp: timeStr,
+            level: "CONTAINMENT",
+            state: "idle",
+            reason: `SOP Full Cycle Completed #${nextCycle} — All containment restowed`,
+            confidence: 0.98,
           });
           avionicsAudio.playCycleCompleteChime();
         }
@@ -649,16 +698,16 @@ export function useTelemetryStream() {
       value: motionEnergy,
       threshold: thresholds.motionFloor,
     },
-    causal_logic: {
-      id: "causal_logic",
-      name: "Causal / FSM Logic",
-      passed: isCausalPass,
-      reason: isCausalPass
-        ? "FSM sequence consistent"
-        : (activeAlert?.reason || "Illegal sequence transition blocked by causal graph"),
-      value: isCausalPass ? "VALID" : "VIOLATION",
-      threshold: "STRICT_ORDER",
-    },
+      causal_logic: {
+        id: "causal_logic",
+        name: "Causal/FSM Logic",
+        passed: isCausalPass,
+        reason: isCausalPass
+          ? "Sequential causal invariant satisfied"
+          : (activeAlert?.reason || CAUSAL_VIOLATION_REASON),
+        value: isCausalPass ? "VALID" : "BLOCKED",
+        threshold: "STRICT_DAG",
+      },
   };
 
   // Dynamic 2.5D bounding boxes tracking physical experiment state (status locked to containment)
@@ -762,18 +811,22 @@ export function useTelemetryStream() {
 
   const resetSimulation = useCallback(() => {
     stateIndexRef.current = 0;
+    cyclesCompletedRef.current = 0;
+    setCyclesCompleted(0);
     setStateIndex(0);
     stateStartRef.current = Date.now();
     lastTransitionRef.current = Date.now() - 3000;
     stabilityCounterRef.current = 15;
     clearAlert();
     setActiveAnomaly(null);
+    setActiveRejection(null);
   }, [clearAlert]);
 
-  // Clean up siren on unmount
+  // Clean up siren and rejection timer on unmount
   useEffect(() => {
     return () => {
       avionicsAudio.stopAlertSiren();
+      if (rejectionTimeoutRef.current) clearTimeout(rejectionTimeoutRef.current);
     };
   }, []);
 

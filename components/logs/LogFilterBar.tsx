@@ -12,6 +12,7 @@ interface LogFilterBarProps {
     ACCEPTED: number;
     REJECTED: number;
     ALERT: number;
+    CONTAINMENT: number;
     INFO: number;
   };
   logs: LogEntry[];
@@ -128,6 +129,14 @@ export function LogFilterBar({
       activeColor: "text-[#FF4D4F]",
       activeBorder: "border-[#FF4D4F]/60",
       activeBg: "bg-[#FF4D4F]/15",
+    },
+    {
+      id: "CONTAINMENT",
+      label: "CONTAINMENT",
+      count: counts.CONTAINMENT,
+      activeColor: "text-[#4DA3FF]",
+      activeBorder: "border-[#4DA3FF]/60",
+      activeBg: "bg-[#4DA3FF]/15",
     },
     {
       id: "INFO",

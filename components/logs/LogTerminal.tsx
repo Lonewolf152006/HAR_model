@@ -95,6 +95,8 @@ export function LogTerminal({ logs, currentFilter }: LogTerminalProps) {
         return "text-[#FF4D4F]";
       case "ALERT":
         return "text-[#FF4D4F]";
+      case "CONTAINMENT":
+        return "text-[#4DA3FF]";
       case "INFO":
       default:
         return "text-[#8A919C]";
@@ -109,6 +111,8 @@ export function LogTerminal({ logs, currentFilter }: LogTerminalProps) {
         return "text-[#FF4D4F]";
       case "ALERT":
         return "text-[#FF4D4F]";
+      case "CONTAINMENT":
+        return "text-[#8A919C]";
       case "INFO":
       default:
         return "text-[#8A919C]";

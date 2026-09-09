@@ -17,16 +17,16 @@ export function CameraSourcePanel() {
     <AvionicsPanel
       title="OPTICAL SENSOR CAMERA SOURCE"
       badge={
-        <span className="px-2 py-0.5 font-mono text-[9px] font-bold rounded-[2px] border bg-[#00E08A]/10 text-[#00E08A] border-[#00E08A]/50 glow-nominal flex items-center gap-1">
+        <span className="px-2 py-0.5 font-mono text-[9.5px] font-bold rounded-[2px] border bg-[#00E08A]/10 text-[#00E08A] border-[#00E08A]/50 glow-nominal flex items-center gap-1">
           <span className="w-1.5 h-1.5 rounded-full bg-[#00E08A] animate-pulse" />
-          ACTIVE BUS
+          CONNECTED
         </span>
       }
       className="flex flex-col justify-between p-3 font-mono"
     >
       <div className="space-y-2.5">
         <div className="flex items-center justify-between text-[9px] text-[#565C66] tracking-wider uppercase pb-1 border-b border-white/5">
-          <span>HARDWARE FEED BUS</span>
+          <span>CAMERA INPUT</span>
           <span>SELECT SWITCH</span>
         </div>
 
@@ -52,26 +52,20 @@ export function CameraSourcePanel() {
           })}
         </div>
 
-        {/* Selected Sensor Telemetry & Specification Readout */}
+        {/* Selected Sensor Specification Readout */}
         <div className="p-2.5 bg-[#171B21] border border-white/5 rounded-[2px] bezel-depth-subtle">
-          <div className="flex items-center justify-between text-[8.5px] text-[#565C66] tracking-wider uppercase mb-1">
-            <span className="flex items-center gap-1">
-              <Camera className="w-3 h-3 text-[#8A919C]" />
-              <span>SENSOR INTERFACE SPECIFICATION</span>
-            </span>
-            <span className="text-[#4DA3FF]">LOCKED</span>
+          <div className="flex items-center gap-1 text-[8.5px] text-[#565C66] tracking-wider uppercase mb-1">
+            <Camera className="w-3 h-3 text-[#8A919C]" />
+            <span>ACTIVE SENSOR INTERFACE</span>
           </div>
 
           <div className="text-xs sm:text-sm font-bold text-[#E6E9ED] tracking-wide">
             {activeConfig.resolutionFps} | {activeConfig.sensor}
-          </div>
-
-          <div className="flex items-center justify-between text-[9px] text-[#8A919C] mt-1.5 pt-1.5 border-t border-white/5">
-            <span className="flex items-center gap-1">
-              <Cpu className="w-2.5 h-2.5 text-[#565C66]" />
-              <span>CARRIER LINK: {activeConfig.bus}</span>
-            </span>
-            <span className="text-[#00E08A]">SYNCHRONIZED</span>
+            {activeConfig.id === "primary"
+              ? " (4-LANE D-PHY)"
+              : activeConfig.id === "secondary"
+              ? " (USB 3.1)"
+              : " (V4L2 LOOPBACK)"}
           </div>
         </div>
       </div>
