@@ -18,8 +18,10 @@ export function BootSequence({ onComplete, forceReplay = false }: BootSequencePr
     if (!forceReplay) {
       const booted = sessionStorage.getItem("orbital_har_booted");
       if (booted === "true") {
-        setIsDismissed(true);
-        if (onComplete) onComplete();
+        queueMicrotask(() => {
+          setIsDismissed(true);
+          if (onComplete) onComplete();
+        });
         return;
       }
     }
