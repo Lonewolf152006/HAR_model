@@ -117,15 +117,45 @@ export function useTelemetryStream() {
 
   // Settings & Configuration State
   const [thresholds, setThresholds] = useState<GateThresholds>(DEFAULT_GATE_THRESHOLDS);
-  const [cameraSource, setCameraSource] = useState<CameraSourceId>("primary");
+  const [cameraSource, setCameraSourceState] = useState<CameraSourceId>("primary");
   const [isReplayingBoot, setIsReplayingBoot] = useState<boolean>(false);
 
   const updateThresholds = useCallback((newThresholds: Partial<GateThresholds>) => {
     setThresholds((prev) => ({ ...prev, ...newThresholds }));
+    fetch("http://localhost:8080/api/v1/settings/gates", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        confidence: newThresholds.confidence,
+        stability: newThresholds.stabilityWindow,
+        cooldown: newThresholds.cooldown,
+        motion: newThresholds.motionFloor,
+      }),
+    }).catch(() => {});
   }, []);
 
   const restoreDefaultThresholds = useCallback(() => {
     setThresholds(DEFAULT_GATE_THRESHOLDS);
+    fetch("http://localhost:8080/api/v1/settings/gates", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        confidence: DEFAULT_GATE_THRESHOLDS.confidence,
+        stability: DEFAULT_GATE_THRESHOLDS.stabilityWindow,
+        cooldown: DEFAULT_GATE_THRESHOLDS.cooldown,
+        motion: DEFAULT_GATE_THRESHOLDS.motionFloor,
+      }),
+    }).catch(() => {});
+  }, []);
+
+  const setCameraSource = useCallback((id: CameraSourceId) => {
+    setCameraSourceState(id);
+    const devId = id === "primary" ? "0" : id === "secondary" ? "1" : "file";
+    fetch("http://localhost:8080/api/v1/camera/select", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device_id: devId }),
+    }).catch(() => {});
   }, []);
 
   const replayBootSequence = useCallback(() => {
@@ -250,6 +280,63 @@ export function useTelemetryStream() {
     timestamp: string;
   } | null>(null);
   const [lastAcceptedState, setLastAcceptedState] = useState<HarState | null>(null);
+
+  // Live WebSocket Backend Connection
+  const [isLiveBackendConnected, setIsLiveBackendConnected] = useState<boolean>(false);
+  const [liveTelemetry, setLiveTelemetry] = useState<any>(null);
+
+  useEffect(() => {
+    let ws: WebSocket | null = null;
+    let timer: NodeJS.Timeout | null = null;
+
+    function connectWs() {
+      try {
+        const host = typeof window !== "undefined" ? window.location.hostname || "localhost" : "localhost";
+        ws = new WebSocket(`ws://${host}:8080/ws/telemetry`);
+
+        ws.onopen = () => {
+          setIsLiveBackendConnected(true);
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const parsed = JSON.parse(event.data);
+            if (parsed.msg_type === "TELEMETRY" && parsed.data) {
+              setLiveTelemetry(parsed.data);
+            } else if (parsed.msg_type === "VOICE_PROMPT" && parsed.text) {
+              if (!isMuted && typeof window !== "undefined" && "speechSynthesis" in window) {
+                const utterance = new SpeechSynthesisUtterance(parsed.text);
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                window.speechSynthesis.speak(utterance);
+              }
+            }
+          } catch (e) {
+            // ignore malformed frame
+          }
+        };
+
+        ws.onclose = () => {
+          setIsLiveBackendConnected(false);
+          timer = setTimeout(connectWs, 2500);
+        };
+
+        ws.onerror = () => {
+          setIsLiveBackendConnected(false);
+          if (ws) ws.close();
+        };
+      } catch (err) {
+        setIsLiveBackendConnected(false);
+        timer = setTimeout(connectWs, 2500);
+      }
+    }
+
+    connectWs();
+    return () => {
+      if (ws) ws.close();
+      if (timer) clearTimeout(timer);
+    };
+  }, [isMuted]);
 
   // Internal mutable simulation refs
   const stateStartRef = useRef<number>(0);
@@ -796,27 +883,39 @@ export function useTelemetryStream() {
     ];
   }, [currentState, containment, frameId]);
 
+  const activeCurrentState: HarState = (isLiveBackendConnected && liveTelemetry?.current_state) ? liveTelemetry.current_state : currentState;
+  const activeExpectedNext: HarState = (isLiveBackendConnected && liveTelemetry?.expected_next) ? liveTelemetry.expected_next : expectedNext;
+  const activeConfidence: number = (isLiveBackendConnected && liveTelemetry?.confidence != null) ? liveTelemetry.confidence : confidence;
+  const activeConfidenceHistory: number[] = (isLiveBackendConnected && liveTelemetry?.confidence_history?.length) ? liveTelemetry.confidence_history : confidenceHistory;
+  const activeGates: GateResults = (isLiveBackendConnected && liveTelemetry?.gates && Object.keys(liveTelemetry.gates).length > 0) ? liveTelemetry.gates : gates;
+  const activeContainment: ContainmentState = (isLiveBackendConnected && liveTelemetry?.containment) ? liveTelemetry.containment : containment;
+  const activeFsm: FsmBooleans = (isLiveBackendConnected && liveTelemetry?.fsm) ? liveTelemetry.fsm : fsm;
+  const activeCyclesCompleted: number = (isLiveBackendConnected && liveTelemetry?.cycles_completed != null) ? liveTelemetry.cycles_completed : cyclesCompleted;
+  const activeAlertState: ActiveAlertState | null = (isLiveBackendConnected && liveTelemetry?.active_alert !== undefined) ? liveTelemetry.active_alert : activeAlert;
+  const activeLatency: number = (isLiveBackendConnected && liveTelemetry?.latency_ms != null) ? liveTelemetry.latency_ms : inferenceLatency;
+  const activeFps: number = (isLiveBackendConnected && liveTelemetry?.fps != null) ? liveTelemetry.fps : 59.8;
+
   const frame: TelemetryFrame = {
-    frame_id: frameId,
-    timestamp: timeStr,
-    current_state: currentState,
-    expected_next: expectedNext,
-    confidence,
-    stability_count: stabilityCounterRef.current,
-    state_duration_ms: currentElapsed,
-    motion_energy: motionEnergy,
-    gates,
-    containment,
-    fsm,
-    is_transition: currentElapsed < 300,
-    transition_status: activeAlert?.active
+    frame_id: (isLiveBackendConnected && liveTelemetry?.frame_id) ? liveTelemetry.frame_id : frameId,
+    timestamp: (isLiveBackendConnected && liveTelemetry?.timestamp) ? liveTelemetry.timestamp : timeStr,
+    current_state: activeCurrentState,
+    expected_next: activeExpectedNext,
+    confidence: activeConfidence,
+    stability_count: (isLiveBackendConnected && liveTelemetry?.stability_count != null) ? liveTelemetry.stability_count : stabilityCounterRef.current,
+    state_duration_ms: (isLiveBackendConnected && liveTelemetry?.state_duration_ms != null) ? liveTelemetry.state_duration_ms : currentElapsed,
+    motion_energy: (isLiveBackendConnected && liveTelemetry?.motion_energy != null) ? liveTelemetry.motion_energy : motionEnergy,
+    gates: activeGates,
+    containment: activeContainment,
+    fsm: activeFsm,
+    is_transition: (isLiveBackendConnected && liveTelemetry?.is_transition != null) ? liveTelemetry.is_transition : currentElapsed < 300,
+    transition_status: activeAlertState?.active
       ? "alert"
       : !isConfidencePass || !isCooldownPass || !isMotionPass
         ? "rejected"
         : "nominal",
-    active_alert: activeAlert,
-    latency_ms: inferenceLatency,
-    fps: 59.8,
+    active_alert: activeAlertState,
+    latency_ms: activeLatency,
+    fps: activeFps,
   };
 
   const resetSimulation = useCallback(() => {
@@ -920,18 +1019,18 @@ export function useTelemetryStream() {
 
   return {
     frame,
-    currentState,
-    expectedNext,
-    confidence,
-    confidenceHistory,
+    currentState: activeCurrentState,
+    expectedNext: activeExpectedNext,
+    confidence: activeConfidence,
+    confidenceHistory: activeConfidenceHistory,
     boundingBoxes,
-    gates,
-    containment,
-    fsm,
+    gates: activeGates,
+    containment: activeContainment,
+    fsm: activeFsm,
     logs,
-    cyclesCompleted,
+    cyclesCompleted: activeCyclesCompleted,
     subsystems,
-    inferenceLatency,
+    inferenceLatency: activeLatency,
     isPaused,
     setIsPaused,
     isMuted,
@@ -941,7 +1040,7 @@ export function useTelemetryStream() {
     injectAnomaly,
     triggerCausalViolation,
     resetSimulation,
-    activeAlert,
+    activeAlert: activeAlertState,
     activeRejection,
     lastAcceptedState,
     streamStatus,
@@ -962,5 +1061,6 @@ export function useTelemetryStream() {
     replayBootSequence,
     handleBootComplete,
     isConnected: true,
+    isLiveBackendConnected,
   };
 }

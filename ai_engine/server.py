@@ -55,20 +55,21 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # 1. Live Video Feed (MJPEG Stream)
 # ---------------------------------------------------------------------------
-def generate_mjpeg_frames():
-    """Generator for multipart/x-mixed-replace MJPEG video stream."""
+async def generate_mjpeg_frames():
+    """Async generator for multipart/x-mixed-replace MJPEG video stream."""
     while True:
-        frame_bytes = pipeline.get_latest_jpeg()
-        if frame_bytes:
-            yield (
-                b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n"
-            )
-        time.sleep(0.033)  # ~30 FPS stream
+        if pipeline:
+            frame_bytes = pipeline.get_latest_jpeg()
+            if frame_bytes:
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n"
+                )
+        await asyncio.sleep(0.033)  # ~30 FPS
 
 
 @app.get("/video_feed")
-def video_feed():
+async def video_feed():
     """Returns continuous multipart/x-mixed-replace annotated video stream."""
     return StreamingResponse(
         generate_mjpeg_frames(),

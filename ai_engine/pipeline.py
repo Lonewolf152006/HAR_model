@@ -346,7 +346,12 @@ class AstroFlowPipeline:
                     pass
 
             # 3. Compute 332-D Spatial Feature Vector
-            base_feat = extract_base_features(pose_res, hands_res, boxes, frame)
+            o_red = boxes["red_box"]["xyxy"] if boxes.get("red_box") else None
+            o_blue = boxes["blue_box"]["xyxy"] if boxes.get("blue_box") else None
+            o_main = boxes["main_box"]["xyxy"] if boxes.get("main_box") else None
+            override_boxes = (o_red, o_blue, o_main)
+
+            base_feat, _, _, _, _ = extract_base_features(pose_res, hands_res, frame, override_boxes=override_boxes)
             if self.prev_features is None:
                 vel_feat = np.zeros(BASE_DIM, dtype=np.float32)
             else:

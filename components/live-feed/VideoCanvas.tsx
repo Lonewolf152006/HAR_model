@@ -76,6 +76,20 @@ export function VideoCanvas() {
         onMouseLeave={() => setIsHovered(false)}
         className="flex-1 min-h-0 relative w-full bg-[#07080B] lens-vignette select-none overflow-hidden cursor-crosshair group flex items-center justify-center"
       >
+        {/* Live Camera Stream from Edge Vision Hub (Camo Studio / Video Feed) */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/video_feed"
+          alt="Live Camera Feed"
+          className="absolute inset-0 w-full h-full object-cover z-0"
+          onError={(e) => {
+            (e.currentTarget as HTMLElement).style.display = "none";
+          }}
+          onLoad={(e) => {
+            (e.currentTarget as HTMLElement).style.display = "block";
+          }}
+        />
+
         {/* Subtle Background Perspective Grid & Microgravity Workstation Simulation */}
         <div className="absolute inset-0 bg-dot-grid opacity-25 pointer-events-none" />
 
