@@ -9,7 +9,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:backend": "python -m unittest discover -s tests -p \"test_*.py\""
+    "test:backend": "bun run scripts/test-backend.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.43.0",
