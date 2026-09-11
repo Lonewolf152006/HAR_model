@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import type { ApiResponse, StateSnapshot } from "../../../lib/backend/types";
+import type { ApiResponse, StateSnapshot } from "../../../../lib/backend/types";
 
 // GET /api/v1/state
 // Returns the current FSM snapshot. This is a stub that will be wired to the
