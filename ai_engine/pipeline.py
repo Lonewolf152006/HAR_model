@@ -26,6 +26,7 @@ if SCRIPT_DIR not in sys.path:
 
 import realtime as rt
 from pose_extract_advanced import extract_base_features, BASE_DIM
+import pose_extract_advanced as pea
 from ai_engine.tts import VoiceCopilot
 
 
@@ -73,36 +74,30 @@ class AstroFlowPipeline:
         pose_res = self.pose.process(rgb)
         hand_res = self.hands.process(rgb)
 
-        # 1. YOLO Object Detection with Class Validation
+        # 1. YOLO Object Detection (Direct proven implementation from test_video_tar.py)
+        yolo_detections = pea.run_yolo(self.yolo_model, frame, conf_threshold=0.20)
         yolo_red, yolo_blue, yolo_main = None, None, None
-        try:
-            yolo_res = self.yolo_model.predict(frame, verbose=False, conf=0.30)
-            cur_lms = pose_res.pose_landmarks if pose_res else None
-            for r in yolo_res:
-                for box in r.boxes:
-                    cls_name = self.yolo_model.names.get(int(box.cls[0]), "")
-                    x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].cpu().numpy()]
-                    rect = (x1, y1, max(1, x2 - x1), max(1, y2 - y1))
-                    box_item = {"rect": rect, "area": rect[2] * rect[3], "score": float(box.conf[0])}
-
-                    if "red" in cls_name:
-                        if rt.validate_yolo_detection(frame, rect, cls_name, pose_landmarks=cur_lms):
-                            if yolo_red is None or box_item["score"] > yolo_red["score"]:
-                                yolo_red = box_item
-                    elif "blue" in cls_name:
-                        if rt.validate_yolo_detection(frame, rect, cls_name, pose_landmarks=cur_lms):
-                            if yolo_blue is None or box_item["score"] > yolo_blue["score"]:
-                                yolo_blue = box_item
-                    elif "main" in cls_name or "box" in cls_name:
-                        if yolo_main is None or box_item["score"] > yolo_main["score"]:
-                            yolo_main = box_item
-        except Exception as e:
-            pass
+        for det in yolo_detections:
+            x1, y1, x2, y2 = [int(v) for v in det["box"]]
+            rect = (x1, y1, max(1, x2 - x1), max(1, y2 - y1))
+            box_item = {"rect": rect, "area": rect[2] * rect[3], "score": det["conf"]}
+            name = det["name"]
+            if "red" in name and (yolo_red is None or det["conf"] > yolo_red["score"]):
+                yolo_red = box_item
+            elif "blue" in name and (yolo_blue is None or det["conf"] > yolo_blue["score"]):
+                yolo_blue = box_item
+            elif "main" in name or "box" in name:
+                if yolo_main is None or det["conf"] > yolo_main["score"]:
+                    yolo_main = box_item
 
         # 2. Extract Base Features with Bounding Boxes
         base, det_flags, (red_box, blue_box, main_box), edge_debug, lid_score = extract_base_features(
             pose_res, hand_res, frame, override_boxes=(yolo_red, yolo_blue, yolo_main)
         )
+
+        # Prevent edge detector from hallucinating main_box on empty room desks
+        if yolo_main is None and yolo_red is None and yolo_blue is None:
+            main_box = None
 
         # 3. Smooth Brief Dropouts via BoxTracker (up to 8 frames)
         red_box = self.box_tracker.get_fallback("red", red_box)

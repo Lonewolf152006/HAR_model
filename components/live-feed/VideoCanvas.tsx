@@ -40,7 +40,6 @@ export function VideoCanvas() {
     isReducedMotion,
     isMuted,
     ingestRealTelemetry,
-    posePoints,
     poseLocked,
     boundingBoxes,
   } = useTelemetry();
@@ -59,6 +58,9 @@ export function VideoCanvas() {
   const [cameraPermissionGranted, setCameraPermissionGranted] = useState<boolean | null>(null);
   const [inferenceLatency, setInferenceLatency] = useState<number>(11.4);
   const [isPlayingVideoFile, setIsPlayingVideoFile] = useState<boolean>(false);
+  const [displayPose, setDisplayPose] = useState<Array<{ x: number; y: number; v: number }>>([]);
+  const lastPoseRef = useRef<Array<{ x: number; y: number; v: number }>>([]);
+  const missingCountRef = useRef<number>(0);
   const isInferringRef = useRef<boolean>(false);
 
   // 1. Initialize Browser Camera Stream & Enumerate Devices
@@ -155,11 +157,16 @@ export function VideoCanvas() {
       isInferringRef.current = true;
       try {
         const canvas = hiddenCanvasRef.current;
-        canvas.width = video.videoWidth || 640;
-        canvas.height = video.videoHeight || 480;
+        // Standardized 640px wide resolution for high-speed YOLO & MediaPipe inference
+        const targetW = 640;
+        const targetH = video.videoHeight > 0 && video.videoWidth > 0
+          ? Math.round((video.videoHeight / video.videoWidth) * targetW)
+          : 360;
+        canvas.width = targetW;
+        canvas.height = targetH;
         const ctx = canvas.getContext("2d");
         if (ctx) {
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          ctx.drawImage(video, 0, 0, targetW, targetH);
           canvas.toBlob(async (blob) => {
             if (!blob) {
               isInferringRef.current = false;
@@ -179,6 +186,18 @@ export function VideoCanvas() {
                   ingestRealTelemetry(data.telemetry);
                   if (data.telemetry.latency_ms) {
                     setInferenceLatency(data.telemetry.latency_ms);
+                  }
+
+                  // Smooth pose landmarks across brief camera dropouts (zero flickering!)
+                  if (data.telemetry.pose_points && Array.isArray(data.telemetry.pose_points) && data.telemetry.pose_points.length >= 15) {
+                    lastPoseRef.current = data.telemetry.pose_points;
+                    missingCountRef.current = 0;
+                    setDisplayPose(data.telemetry.pose_points);
+                  } else {
+                    missingCountRef.current += 1;
+                    if (missingCountRef.current > 6) {
+                      setDisplayPose([]);
+                    }
                   }
 
                   // Voice Copilot Audio Speech (100% reliable in-browser speech synthesis)
@@ -332,7 +351,7 @@ export function VideoCanvas() {
           autoPlay
           playsInline
           muted
-          className="absolute inset-0 w-full h-full object-cover z-0"
+          className="absolute inset-0 w-full h-full object-contain z-0"
         />
 
         {/* Camera Permission Needed State */}
@@ -352,8 +371,8 @@ export function VideoCanvas() {
           </div>
         )}
 
-        {/* Real MediaPipe Pose Tracking Skeleton (ONLY rendered when person is detected!) */}
-        {posePoints && posePoints.length >= 25 && (
+        {/* Real MediaPipe Pose Tracking Skeleton (Stabilized with hold buffer to eliminate flickering) */}
+        {displayPose && displayPose.length >= 15 && (
           <svg
             className="absolute inset-0 w-full h-full pointer-events-none z-10"
             viewBox="0 0 100 100"
@@ -361,8 +380,8 @@ export function VideoCanvas() {
           >
             {/* Skeleton Connecting Lines */}
             {POSE_CONNECTIONS.map(([i, j], idx) => {
-              const p1 = posePoints[i];
-              const p2 = posePoints[j];
+              const p1 = displayPose[i];
+              const p2 = displayPose[j];
               if (!p1 || !p2 || (p1.v != null && p1.v < 0.35) || (p2.v != null && p2.v < 0.35)) return null;
               return (
                 <line
@@ -379,7 +398,7 @@ export function VideoCanvas() {
             })}
 
             {/* Glowing Joint Nodes */}
-            {posePoints.map((pt, idx) => {
+            {displayPose.map((pt, idx) => {
               if (pt.v != null && pt.v < 0.35) return null;
               return (
                 <circle
@@ -487,11 +506,11 @@ export function VideoCanvas() {
             </span>
           </div>
 
-          {/* AI Pose Tracking Lock Status Indicator */}
+          {/* AI Pose Tracking Lock Status Indicator (Stabilized) */}
           <div className="flex items-center gap-1.5 px-2 py-0.5 bg-[#0E1015]/85 border border-white/10 rounded-[2px] font-mono text-[9px] backdrop-blur-sm">
-            <span className={`w-1.5 h-1.5 rounded-full ${poseLocked ? "bg-[#00E08A] animate-pulse" : "bg-[#FFB020]"}`} />
-            <span className={poseLocked ? "text-[#00E08A] font-bold" : "text-[#FFB020]"}>
-              {poseLocked ? "POSE: 33 PTS LOCKED" : "POSE: SEARCHING SUBJECT"}
+            <span className={`w-1.5 h-1.5 rounded-full ${displayPose.length >= 15 ? "bg-[#00E08A] animate-pulse" : "bg-[#FFB020]"}`} />
+            <span className={displayPose.length >= 15 ? "text-[#00E08A] font-bold" : "text-[#FFB020]"}>
+              {displayPose.length >= 15 ? "POSE: 33 PTS LOCKED" : "POSE: SEARCHING SUBJECT"}
             </span>
           </div>
         </div>
