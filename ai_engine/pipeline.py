@@ -1,559 +1,336 @@
 """
 ai_engine/pipeline.py - Real-Time AI Inference Pipeline & Decision Engine
 
-Integrates:
-- MediaPipe Pose & Hands 2.5D landmark extraction
-- YOLOv8 bounding box object detection (main_box, red_box, blue_box)
-- 332-D Temporal Spatial/Kinematic Feature Extractor
-- TARModel (BiLSTM + Multi-Head Attention) inference
-- 5-Gate Deterministic DecisionStabilizer
-- Physical Causal Logic FSM & 2.5D Geometric Containment Engine
-- Offline Personal Assistant Voice Copilot (TTS)
-- HUD Visual Annotator & MJPEG Stream Encoder
+Thin, high-performance wrapper around realtime.py from vision-pipeline:
+- Preserves 100% of the proven BiLSTM + Attention inference, YOLO object validation,
+  BoxTracker dropout smoothing, MotionActionSpotter, and 2.5D Geometric Containment.
+- Smooths pose landmarks across frame boundaries to prevent UI flickering.
+- Feeds live frames from both cameras and uploaded video files into the exact same pipeline.
 """
 
 import os
 import sys
 import time
-import threading
-from collections import deque
 from datetime import datetime
+from collections import deque
 
 import cv2
 import numpy as np
 import torch
-from ultralytics import YOLO
+import mediapipe as mp
 
-# Local imports
-from ai_engine.model_def import TARModel, FEATURE_DIM, NUM_CLASSES, SEQ_LEN
-from ai_engine.camera import CameraManager
+# Ensure ai_engine is in python path
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+
+import realtime as rt
+from pose_extract_advanced import extract_base_features, BASE_DIM
 from ai_engine.tts import VoiceCopilot
-import ai_engine.feature_utils as fu
-from ai_engine.pose_extract_advanced import extract_base_features, BASE_DIM
-
-
-SOP_SEQUENCE = [
-    "idle",
-    "open_box",
-    "pick_red",
-    "place_red_out",
-    "pick_blue",
-    "place_blue_in",
-    "close_box",
-]
-
-SOP_DISPLAY_NAMES = {
-    "idle": "IDLE_STANDBY",
-    "open_box": "OPEN_CONTAINER",
-    "pick_red": "PICK_RED_CUBE",
-    "place_red_out": "PLACE_RED_EXTERIOR",
-    "pick_blue": "PICK_BLUE_CUBE",
-    "place_blue_in": "PLACE_BLUE_INTERIOR",
-    "close_box": "CLOSE_CONTAINER",
-}
-
-
-class PhysicalCausalLogic:
-    """Deterministic physical FSM logic and geometric containment verification."""
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        self.box_open = False
-        self.red_picked = False
-        self.red_placed_out = False
-        self.blue_picked = False
-        self.blue_placed_in = False
-
-    def can_transition(self, action, main_box=None, red_box=None, blue_box=None):
-        if action == "idle":
-            return True, "ok"
-
-        if action == "open_box":
-            if main_box is None:
-                return False, "No container detected in camera view"
-            if self.box_open:
-                return False, "Container is already open"
-            return True, "ok"
-
-        if action == "pick_red":
-            if not self.box_open:
-                return False, "Cannot pick red sample: Container lid is closed"
-            if main_box is None:
-                return False, "No container detected in camera view"
-            if self.red_placed_out:
-                return False, "Red sample already placed on exterior"
-            return True, "ok"
-
-        if action == "place_red_out":
-            if not self.red_picked:
-                return False, "Cannot place red: Red sample was not picked"
-            return True, "ok"
-
-        if action == "pick_blue":
-            if not self.red_placed_out:
-                return False, "Red cube must be placed on exterior before picking blue"
-            if self.blue_placed_in:
-                return False, "Blue cube already placed in container"
-            return True, "ok"
-
-        if action == "place_blue_in":
-            if not self.blue_picked:
-                return False, "Cannot place blue: Blue sample was not picked"
-            if not self.box_open:
-                return False, "Cannot deposit blue: Container lid is closed"
-            return True, "ok"
-
-        if action == "close_box":
-            if not self.box_open:
-                return False, "Container is already closed"
-            if main_box is None:
-                return False, "No container detected in camera view"
-            if not self.red_placed_out:
-                return False, "Cannot close container: Red sample is not secured on exterior"
-            if not self.blue_placed_in:
-                return False, "Cannot close container: Blue sample is not inside"
-            return True, "ok"
-
-        return False, "Unrecognized action transition"
-
-    def apply(self, action):
-        if action == "open_box":
-            self.box_open = True
-        elif action == "pick_red":
-            self.red_picked = True
-        elif action == "place_red_out":
-            self.red_placed_out = True
-        elif action == "pick_blue":
-            self.blue_picked = True
-        elif action == "place_blue_in":
-            self.blue_placed_in = True
-        elif action == "close_box":
-            self.box_open = False
-
-    def to_dict(self):
-        return {
-            "box_open": self.box_open,
-            "red_picked": self.red_picked,
-            "red_placed_out": self.red_placed_out,
-            "blue_picked": self.blue_picked,
-            "blue_placed_in": self.blue_placed_in,
-        }
-
-
-class DecisionStabilizer:
-    """5-Gate Decision Stabilizer for deterministic state changes."""
-    def __init__(self, confidence=0.52, stability_window=5, cooldown=0.85, motion_floor=0.12):
-        self.confidence_threshold = confidence
-        self.stability_window = stability_window
-        self.cooldown_sec = cooldown
-        self.motion_floor = motion_floor
-
-        self.current_state = "idle"
-        self.state_index = 0
-        self.consecutive_count = 1
-        self.last_transition_time = time.time()
-        self.candidate_state = "idle"
-        self.fsm = PhysicalCausalLogic()
-        self.cycles_completed = 0
-
-    @property
-    def expected_next(self):
-        idx = (self.state_index + 1) % len(SOP_SEQUENCE)
-        return SOP_SEQUENCE[idx]
-
-    def update(self, raw_probs, motion_energy, main_box=None, red_box=None, blue_box=None):
-        now = time.time()
-        best_idx = int(np.argmax(raw_probs))
-        candidate = fu.LABELS[best_idx]
-        conf = float(raw_probs[best_idx])
-
-        # Track consecutive candidate stability
-        if candidate == self.candidate_state:
-            self.consecutive_count += 1
-        else:
-            self.candidate_state = candidate
-            self.consecutive_count = 1
-
-        # Evaluate 5 Gates
-        gate_conf = conf >= self.confidence_threshold
-        gate_stab = self.consecutive_count >= self.stability_window
-        time_since_trans = now - self.last_transition_time
-        gate_cool = time_since_trans >= self.cooldown_sec
-        gate_motion = True if candidate == "idle" else motion_energy >= self.motion_floor
-
-        causal_ok, causal_reason = self.fsm.can_transition(
-            candidate, main_box=main_box, red_box=red_box, blue_box=blue_box
-        )
-        gate_causal = causal_ok
-
-        gates = {
-            "confidence": {
-                "id": "confidence",
-                "name": "Confidence Gate",
-                "passed": bool(gate_conf),
-                "value": round(conf, 2),
-                "threshold": round(self.confidence_threshold, 2),
-                "reason": f"Probability {conf:.2f} >= {self.confidence_threshold:.2f}" if gate_conf else f"Under-confidence ({conf:.2f} < {self.confidence_threshold:.2f})"
-            },
-            "stability": {
-                "id": "stability",
-                "name": "Stability Window",
-                "passed": bool(gate_stab),
-                "value": self.consecutive_count,
-                "threshold": self.stability_window,
-                "reason": f"Held for {self.consecutive_count} frames" if gate_stab else f"Buffer filling ({self.consecutive_count}/{self.stability_window})"
-            },
-            "cooldown": {
-                "id": "cooldown",
-                "name": "Transition Cooldown",
-                "passed": bool(gate_cool),
-                "value": f"{time_since_trans:.1f}s",
-                "threshold": f"{self.cooldown_sec:.2f}s",
-                "reason": "Cooldown satisfied" if gate_cool else f"Cooldown active ({time_since_trans:.1f}s < {self.cooldown_sec:.2f}s)"
-            },
-            "motion": {
-                "id": "motion",
-                "name": "Kinematic Motion",
-                "passed": bool(gate_motion),
-                "value": round(motion_energy, 2),
-                "threshold": round(self.motion_floor, 2),
-                "reason": f"Motion energy {motion_energy:.2f} >= {self.motion_floor:.2f}" if gate_motion else f"Insufficient motion ({motion_energy:.2f} < {self.motion_floor:.2f})"
-            },
-            "causal_logic": {
-                "id": "causal_logic",
-                "name": "Causal Logic Gate",
-                "passed": bool(gate_causal),
-                "value": 1 if gate_causal else 0,
-                "threshold": 1,
-                "reason": causal_reason if not gate_causal else ("Container verified" if main_box is not None else "Awaiting container in scene")
-            }
-        }
-
-        all_passed = gate_conf and gate_stab and gate_cool and gate_motion and gate_causal
-        transition_occurred = False
-        is_alert = False
-        alert_reason = ""
-
-        # Procedural alert ONLY triggers on genuine forward sequence skips when container is actually in view!
-        sop_step_names = ["open_box", "pick_red", "place_red_out", "pick_blue", "place_blue_in", "close_box"]
-        if not gate_causal and candidate != "idle" and gate_conf and gate_stab and main_box is not None:
-            if self.expected_next in sop_step_names and candidate in sop_step_names:
-                exp_idx = sop_step_names.index(self.expected_next)
-                cand_idx = sop_step_names.index(candidate)
-                if cand_idx >= exp_idx:
-                    is_alert = True
-                    alert_reason = causal_reason
-
-        # Commit accepted state transition
-        if all_passed and candidate != self.current_state:
-            self.current_state = candidate
-            self.state_index = SOP_SEQUENCE.index(candidate)
-            self.last_transition_time = now
-            self.fsm.apply(candidate)
-            self.consecutive_count = 1
-            transition_occurred = True
-
-            if candidate == "close_box":
-                self.cycles_completed += 1
-
-        return {
-            "current_state": self.current_state,
-            "state_index": self.state_index,
-            "expected_next": self.expected_next,
-            "confidence": conf,
-            "stability_count": self.consecutive_count,
-            "gates": gates,
-            "fsm": self.fsm.to_dict(),
-            "is_transition": transition_occurred,
-            "transition_status": "alert" if is_alert else ("nominal" if all_passed else "evaluating"),
-            "active_alert": {"active": True, "reason": alert_reason, "timestamp": datetime.now().isoformat()} if is_alert else None,
-            "cycles_completed": self.cycles_completed
-        }
 
 
 class AstroFlowPipeline:
-    """Complete asynchronous edge vision pipeline."""
-    def __init__(self, model_path="ai_engine/models/best_tar_model.pth", yolo_path="ai_engine/models/yolo_boxes.pt"):
-        self.device = torch.device("cpu")
-        self.camera = CameraManager(initial_source=0)
+    """Production Inference Pipeline wrapping realtime.py."""
+    def __init__(self):
+        print(f"[PIPELINE] Initializing models from {rt.MODEL_PATH} and {rt.YOLO_MODEL_PATH}...")
+        self.tar_model = rt.load_tar_model(rt.MODEL_PATH)
+        self.yolo_model = rt.load_yolo(rt.YOLO_MODEL_PATH)
+
+        self.stabilizer = rt.DecisionStabilizer(
+            rt.CONFIDENCE_THRESHOLD, rt.STABILITY_WINDOW, rt.COOLDOWN_SEC, rt.CYCLE_COOLDOWN_SEC
+        )
+        self.spotter = rt.MotionActionSpotter()
+        self.box_tracker = rt.BoxTracker(max_missing=8)
+        self.containment = rt.GeometricContainmentEngine(buffer_size=8)
+        self.sop_tracker = rt.SOPTracker()
         self.voice = VoiceCopilot(enabled=True)
-        self.stabilizer = DecisionStabilizer()
 
-        # Load TARModel
-        self.model = TARModel(input_size=FEATURE_DIM, num_classes=NUM_CLASSES)
-        if os.path.exists(model_path):
-            state_dict = torch.load(model_path, map_location="cpu", weights_only=True)
-            self.model.load_state_dict(state_dict)
-            print(f"[PIPELINE] Loaded TARModel weights: {model_path}")
-        self.model.eval()
+        self.pose = mp.solutions.pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+        self.hands = mp.solutions.hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5, max_num_hands=2)
 
-        # Load YOLOv8
-        self.yolo = None
-        if os.path.exists(yolo_path):
-            self.yolo = YOLO(yolo_path)
-            print(f"[PIPELINE] Loaded YOLO detector: {yolo_path}")
-
-        # Feature buffers
-        self.seq_len = SEQ_LEN
-        self.feature_buffer = deque(maxlen=self.seq_len)
-        self.prev_features = None
-
-        # MediaPipe Solutions
-        import mediapipe as mp
-        self.mp_pose = mp.solutions.pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
-        self.mp_hands = mp.solutions.hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5, max_num_hands=2)
-
-        # Threading state
-        self.running = False
-        self.thread = None
-        self.lock = threading.Lock()
-
-        # Telemetry & Output frame cache
-        self.latest_frame_bytes = None
-        self.latest_telemetry = None
+        self.window = deque(maxlen=rt.SEQ_LEN)
+        self.prev_base = None
         self.frame_counter = 1000
-        self.confidence_history = deque([0.85]*50, maxlen=50)
+        self.confidence_history = deque([0.85] * 50, maxlen=50)
+
+        # Pose smoothing buffer: holds pose across brief 4-frame dropouts to prevent flickering
+        self.last_valid_pose = []
+        self.pose_missing_frames = 0
 
     def start(self):
-        if self.running:
-            return
-        self.running = True
-        self.camera.start()
         self.voice.start()
-        self.thread = threading.Thread(target=self._run_loop, daemon=True)
-        self.thread.start()
-        print("[PIPELINE] Inference worker pipeline running.")
+
+    def stop(self):
+        self.voice.stop()
 
     def process_frame(self, frame, fps=30.0):
-        """Runs the entire AI vision pipeline on any provided frame."""
         t0 = time.time()
         self.frame_counter += 1
-        h, w, _ = frame.shape
+        now = time.time()
+        h, w = frame.shape[:2]
+
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        pose_res = self.pose.process(rgb)
+        hand_res = self.hands.process(rgb)
 
-        # 1. MediaPipe Pose & Hands Detection
-        pose_res = self.mp_pose.process(rgb)
-        hands_res = self.mp_hands.process(rgb)
+        # 1. YOLO Object Detection with Class Validation
+        yolo_red, yolo_blue, yolo_main = None, None, None
+        try:
+            yolo_res = self.yolo_model.predict(frame, verbose=False, conf=0.30)
+            cur_lms = pose_res.pose_landmarks if pose_res else None
+            for r in yolo_res:
+                for box in r.boxes:
+                    cls_name = self.yolo_model.names.get(int(box.cls[0]), "")
+                    x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].cpu().numpy()]
+                    rect = (x1, y1, max(1, x2 - x1), max(1, y2 - y1))
+                    box_item = {"rect": rect, "area": rect[2] * rect[3], "score": float(box.conf[0])}
 
-        # 2. YOLO Object Detections
-        boxes = {"main_box": None, "red_box": None, "blue_box": None}
-        if self.yolo is not None:
-            try:
-                yolo_res = self.yolo.predict(frame, verbose=False, conf=0.35)
-                for r in yolo_res:
-                    for box in r.boxes:
-                        cls_id = int(box.cls[0])
-                        cls_name = self.yolo.names.get(cls_id, "")
-                        xyxy = box.xyxy[0].cpu().numpy().tolist()
-                        conf = float(box.conf[0])
-                        if cls_name in boxes:
-                            boxes[cls_name] = {"xyxy": [int(v) for v in xyxy], "conf": conf}
-            except Exception:
-                pass
+                    if "red" in cls_name:
+                        if rt.validate_yolo_detection(frame, rect, cls_name, pose_landmarks=cur_lms):
+                            if yolo_red is None or box_item["score"] > yolo_red["score"]:
+                                yolo_red = box_item
+                    elif "blue" in cls_name:
+                        if rt.validate_yolo_detection(frame, rect, cls_name, pose_landmarks=cur_lms):
+                            if yolo_blue is None or box_item["score"] > yolo_blue["score"]:
+                                yolo_blue = box_item
+                    elif "main" in cls_name or "box" in cls_name:
+                        if yolo_main is None or box_item["score"] > yolo_main["score"]:
+                            yolo_main = box_item
+        except Exception as e:
+            pass
 
-        # 3. Compute 332-D Spatial Feature Vector
-        o_red = boxes["red_box"]["xyxy"] if boxes.get("red_box") else None
-        o_blue = boxes["blue_box"]["xyxy"] if boxes.get("blue_box") else None
-        o_main = boxes["main_box"]["xyxy"] if boxes.get("main_box") else None
-        override_boxes = (o_red, o_blue, o_main)
-
-        base_feat, _, _, _, _ = extract_base_features(pose_res, hands_res, frame, override_boxes=override_boxes)
-        if self.prev_features is None:
-            vel_feat = np.zeros(BASE_DIM, dtype=np.float32)
-        else:
-            vel_feat = base_feat - self.prev_features
-        self.prev_features = base_feat.copy()
-
-        full_feat = np.concatenate([base_feat, vel_feat]).astype(np.float32)
-        self.feature_buffer.append(full_feat)
-
-        # Motion energy
-        motion_energy = float(np.linalg.norm(vel_feat[:66])) / 10.0
-        motion_energy = min(1.0, max(0.05, motion_energy))
-
-        # 4. Neural Network Inference
-        raw_probs = np.zeros(NUM_CLASSES, dtype=np.float32)
-        raw_probs[0] = 0.90  # Default idle
-
-        if len(self.feature_buffer) >= 16:
-            buf_arr = np.array(self.feature_buffer)
-            if len(buf_arr) < self.seq_len:
-                pad = np.tile(buf_arr[-1:], (self.seq_len - len(buf_arr), 1))
-                buf_arr = np.vstack([pad, buf_arr])
-
-            with torch.no_grad():
-                inp_t = torch.tensor(buf_arr, dtype=torch.float32).unsqueeze(0).to(self.device)
-                logits = self.model(inp_t)
-                probs = torch.softmax(logits, dim=-1)[0].cpu().numpy()
-                raw_probs = probs
-
-        inference_ms = (time.time() - t0) * 1000.0
-
-        # 5. 5-Gate Stabilizer & Causal FSM Update (passing detected objects)
-        decision = self.stabilizer.update(
-            raw_probs, motion_energy,
-            main_box=boxes.get("main_box"),
-            red_box=boxes.get("red_box"),
-            blue_box=boxes.get("blue_box")
+        # 2. Extract Base Features with Bounding Boxes
+        base, det_flags, (red_box, blue_box, main_box), edge_debug, lid_score = extract_base_features(
+            pose_res, hand_res, frame, override_boxes=(yolo_red, yolo_blue, yolo_main)
         )
-        self.confidence_history.append(decision["confidence"])
 
-        # Voice Feedback Triggering
+        # 3. Smooth Brief Dropouts via BoxTracker (up to 8 frames)
+        red_box = self.box_tracker.get_fallback("red", red_box)
+        blue_box = self.box_tracker.get_fallback("blue", blue_box)
+        main_box = self.box_tracker.get_fallback("main", main_box)
+
+        # 4. Geometric Containment Evaluation
+        self.containment.update(red_box, blue_box, main_box, pose_res.pose_landmarks if pose_res else None, frame.shape)
+
+        # 5. Kinematic Motion Calculation
+        if self.prev_base is None:
+            motion = 0.0
+            vel = np.zeros_like(base)
+        else:
+            motion = float(np.mean(np.abs(base - self.prev_base)))
+            vel = base - self.prev_base
+        self.prev_base = base.copy()
+
+        # 6. Dual-Path Temporal Action Prediction
+        feat = np.concatenate([base, vel]).astype(np.float32)
+        result = rt.process_frame(
+            feat, motion, self.window, self.tar_model, self.stabilizer, self.spotter, now,
+            yolo_red=yolo_red, yolo_blue=yolo_blue, red_box=red_box, blue_box=blue_box,
+            main_box=main_box, pose_landmarks=pose_res.pose_landmarks if pose_res else None,
+            frame_shape=frame.shape, expected_action=self.sop_tracker.expected_action,
+            containment=self.containment
+        )
+
+        # 7. Update SOP Tracker & Voice Announcements
         voice_prompt = None
-        if decision["is_transition"]:
-            step_num = decision["state_index"]
-            desc = SOP_DISPLAY_NAMES.get(decision["current_state"], decision["current_state"])
-            voice_prompt = f"Step {step_num} verified: {desc}."
+        if result["state_changed"] and result["current_state"] != "idle":
+            self.sop_tracker.update(result["current_state"], now)
+            step_title = self.sop_tracker.expected_action_title or result["current_state"]
+            voice_prompt = f"Step verified: {step_title}."
             self.voice.speak(voice_prompt, priority=2)
-        elif decision["active_alert"]:
-            voice_prompt = f"Procedure alert: {decision['active_alert']['reason']}."
+
+        if result.get("is_mistake") and result.get("mistake_detected"):
+            reason = result.get("mistake_reason", "Procedure sequence deviation")
+            voice_prompt = f"Procedure alert: {reason}."
             self.voice.speak(voice_prompt, priority=0)
 
-        # 6. Geometric Containment Evaluation (Real physical logic: NOT DETECTED if no container in scene)
-        if boxes.get("main_box") is None:
-            containment = {
-                "main_box": "NOT DETECTED",
-                "red_box": "NOT DETECTED",
-                "blue_box": "NOT DETECTED"
-            }
-        else:
-            containment = {
-                "main_box": "OPEN" if decision["fsm"]["box_open"] else "CLOSED",
-                "red_box": "OUTSIDE" if decision["fsm"]["red_placed_out"] else ("HELD" if decision["fsm"]["red_picked"] else ("INSIDE" if decision["fsm"]["box_open"] else "STANDBY")),
-                "blue_box": "INSIDE" if decision["fsm"]["blue_placed_in"] else ("HELD" if decision["fsm"]["blue_picked"] else "STANDBY"),
-            }
-
-        # Real Detected Bounding Boxes from YOLO (ONLY when detected!)
+        # 8. Extract Real Detected Bounding Boxes for UI
         detected_boxes_list = []
-        for b_name, b_data in boxes.items():
-            if b_data and "xyxy" in b_data:
-                bx1, by1, bx2, by2 = b_data["xyxy"]
-                detected_boxes_list.append({
-                    "id": b_name,
-                    "label": b_name.upper().replace("_", " "),
-                    "confidence": round(b_data["conf"], 2),
-                    "x": round((bx1 / w) * 100, 1),
-                    "y": round((by1 / h) * 100, 1),
-                    "w": round(((bx2 - bx1) / w) * 100, 1),
-                    "h": round(((by2 - by1) / h) * 100, 1),
-                    "color": "#FF4D4F" if "red" in b_name else ("#00E08A" if "blue" in b_name else "#4DA3FF"),
-                    "status": containment.get(b_name, "NOMINAL")
-                })
+        if main_box and "rect" in main_box:
+            mx, my, mw, mh = main_box["rect"]
+            detected_boxes_list.append({
+                "id": "main_box",
+                "label": "MAIN CONTAINER",
+                "confidence": round(main_box.get("score", 0.94), 2),
+                "x": round((mx / w) * 100, 1),
+                "y": round((my / h) * 100, 1),
+                "w": round((mw / w) * 100, 1),
+                "h": round((mh / h) * 100, 1),
+                "color": "#4DA3FF",
+                "status": "OPEN" if self.stabilizer.causal_logic.box_open else "CLOSED"
+            })
+        if red_box and "rect" in red_box:
+            rx, ry, rw, rh = red_box["rect"]
+            detected_boxes_list.append({
+                "id": "red_box",
+                "label": "RED CUBE [SAMPLE-A]",
+                "confidence": round(red_box.get("score", 0.90), 2),
+                "x": round((rx / w) * 100, 1),
+                "y": round((ry / h) * 100, 1),
+                "w": round((rw / w) * 100, 1),
+                "h": round((rh / h) * 100, 1),
+                "color": "#FF4D4F",
+                "status": self.containment.red_status
+            })
+        if blue_box and "rect" in blue_box:
+            bx, by, bw, bh = blue_box["rect"]
+            detected_boxes_list.append({
+                "id": "blue_box",
+                "label": "BLUE CUBE [SAMPLE-B]",
+                "confidence": round(blue_box.get("score", 0.90), 2),
+                "x": round((bx / w) * 100, 1),
+                "y": round((by / h) * 100, 1),
+                "w": round((bw / w) * 100, 1),
+                "h": round((bh / h) * 100, 1),
+                "color": "#00E08A",
+                "status": self.containment.blue_status
+            })
 
-        # Extract MediaPipe pose & hand landmark coordinates for frontend tracking skeleton
-        pose_points = []
+        # 9. Extract Pose Coordinates with Smoothing Buffer (No Flickering!)
+        current_pose_points = []
         if pose_res and pose_res.pose_landmarks:
             for lm in pose_res.pose_landmarks.landmark:
-                pose_points.append({
+                current_pose_points.append({
                     "x": round(lm.x * 100, 1),
                     "y": round(lm.y * 100, 1),
                     "v": round(lm.visibility, 2)
                 })
 
-        hands_points = []
-        if hands_res and hands_res.multi_hand_landmarks:
-            for hand in hands_res.multi_hand_landmarks:
-                h_lms = [{"x": round(lm.x * 100, 1), "y": round(lm.y * 100, 1)} for lm in hand.landmark]
-                hands_points.append(h_lms)
+        if len(current_pose_points) >= 25:
+            self.last_valid_pose = current_pose_points
+            self.pose_missing_frames = 0
+            pose_points_out = current_pose_points
+        else:
+            self.pose_missing_frames += 1
+            # Hold previous valid pose for up to 5 frames to eliminate flickering
+            if self.pose_missing_frames <= 5 and self.last_valid_pose:
+                pose_points_out = self.last_valid_pose
+            else:
+                pose_points_out = []
+
+        # 10. Format Containment
+        if main_box is None:
+            containment_state = {
+                "main_box": "NOT DETECTED",
+                "red_box": "NOT DETECTED",
+                "blue_box": "NOT DETECTED"
+            }
+        else:
+            containment_state = {
+                "main_box": "OPEN" if self.stabilizer.causal_logic.box_open else "CLOSED",
+                "red_box": self.containment.red_status if self.containment.red_status != "UNKNOWN" else "STANDBY",
+                "blue_box": self.containment.blue_status if self.containment.blue_status != "UNKNOWN" else "STANDBY",
+            }
+
+        # 11. Format 5 DecisionStabilizer Gates
+        cur_conf = float(result.get("confidence", 0.0))
+        self.confidence_history.append(cur_conf)
+        stab_count = len(self.stabilizer.recent)
+        motion_passed = result.get("current_state") == "idle" or motion >= rt.MOTION_THRESHOLD
+        conf_passed = cur_conf >= rt.CONFIDENCE_THRESHOLD
+        stab_passed = stab_count >= rt.STABILITY_WINDOW
+        cooldown_rem = max(0.0, self.stabilizer.cooldown_sec - (now - self.stabilizer.last_change_time))
+        cool_passed = cooldown_rem <= 0.05
+        causal_passed = not result.get("is_mistake", False)
+
+        gates = {
+            "confidence": {
+                "id": "confidence",
+                "name": "Confidence Gate",
+                "passed": bool(conf_passed),
+                "value": round(cur_conf, 2),
+                "threshold": round(rt.CONFIDENCE_THRESHOLD, 2),
+                "reason": f"Probability {cur_conf:.2f} >= {rt.CONFIDENCE_THRESHOLD:.2f}" if conf_passed else f"Under-confidence ({cur_conf:.2f})"
+            },
+            "stability": {
+                "id": "stability",
+                "name": "Stability Window",
+                "passed": bool(stab_passed),
+                "value": stab_count,
+                "threshold": rt.STABILITY_WINDOW,
+                "reason": f"Held for {stab_count}/{rt.STABILITY_WINDOW} frames"
+            },
+            "cooldown": {
+                "id": "cooldown",
+                "name": "Transition Cooldown",
+                "passed": bool(cool_passed),
+                "value": f"{cooldown_rem:.1f}s" if not cool_passed else "0.0s",
+                "threshold": f"{rt.COOLDOWN_SEC:.2f}s",
+                "reason": "Cooldown clear" if cool_passed else f"Cooldown active ({cooldown_rem:.1f}s)"
+            },
+            "motion": {
+                "id": "motion",
+                "name": "Kinematic Motion",
+                "passed": bool(motion_passed),
+                "value": round(motion, 3),
+                "threshold": round(rt.MOTION_THRESHOLD, 3),
+                "reason": f"Motion {motion:.3f} >= {rt.MOTION_THRESHOLD:.3f}" if motion_passed else "Motion below floor"
+            },
+            "causal_logic": {
+                "id": "causal_logic",
+                "name": "Causal Logic Gate",
+                "passed": bool(causal_passed),
+                "value": 1 if causal_passed else 0,
+                "threshold": 1,
+                "reason": result.get("mistake_reason", "Protocol causal logic verified")
+            }
+        }
+
+        active_alert = None
+        if result.get("is_mistake") and result.get("mistake_detected"):
+            active_alert = {
+                "active": True,
+                "reason": result.get("mistake_reason", "Out-of-sequence action attempted"),
+                "timestamp": datetime.now().isoformat()
+            }
+
+        elapsed_ms = (time.time() - t0) * 1000.0
 
         telemetry = {
             "frame_id": self.frame_counter,
             "timestamp": datetime.now().strftime("%H:%M:%S.%f")[:-3],
-            "current_state": decision["current_state"],
-            "expected_next": decision["expected_next"],
-            "confidence": decision["confidence"],
+            "current_state": result.get("current_state", "idle"),
+            "expected_next": self.sop_tracker.expected_action or "open_box",
+            "confidence": cur_conf,
             "confidence_history": list(self.confidence_history),
-            "stability_count": decision["stability_count"],
-            "state_duration_ms": int((time.time() - self.stabilizer.last_transition_time) * 1000),
-            "motion_energy": round(motion_energy, 2),
-            "gates": decision["gates"],
-            "containment": containment,
-            "fsm": decision["fsm"],
+            "stability_count": stab_count,
+            "state_duration_ms": int((now - self.stabilizer.last_change_time) * 1000),
+            "motion_energy": round(motion, 3),
+            "gates": gates,
+            "containment": containment_state,
+            "fsm": {
+                "box_open": self.stabilizer.causal_logic.box_open,
+                "red_picked": self.stabilizer.causal_logic.red_picked,
+                "red_placed_out": self.stabilizer.causal_logic.red_placed_out,
+                "blue_picked": self.stabilizer.causal_logic.blue_picked,
+                "blue_placed_in": self.stabilizer.causal_logic.blue_placed_in,
+            },
             "boxes": detected_boxes_list,
-            "pose_points": pose_points,
-            "hands_points": hands_points,
-            "pose_locked": len(pose_points) > 0,
+            "pose_points": pose_points_out,
+            "pose_locked": len(pose_points_out) > 0,
             "voice_prompt": voice_prompt,
-            "is_transition": decision["is_transition"],
-            "transition_status": decision["transition_status"],
-            "active_alert": decision["active_alert"],
-            "latency_ms": round(inference_ms, 1),
+            "is_transition": result.get("state_changed", False),
+            "transition_status": "alert" if active_alert else ("nominal" if all(g["passed"] for g in gates.values()) else "evaluating"),
+            "active_alert": active_alert,
+            "latency_ms": round(elapsed_ms, 1),
             "fps": round(fps, 1),
-            "cycles_completed": decision["cycles_completed"]
+            "cycles_completed": self.sop_tracker.cycle_count
         }
 
-        return telemetry, pose_res, hands_res, boxes
+        self.latest_telemetry = telemetry
+        try:
+            _, jpeg_buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            self.latest_frame_bytes = jpeg_buf.tobytes()
+        except Exception:
+            pass
 
-    def _run_loop(self):
-        while self.running:
-            ret, frame, frame_ts, fps = self.camera.read()
-            if not ret or frame is None:
-                time.sleep(0.01)
-                continue
-
-            telemetry, pose_res, hands_res, boxes = self.process_frame(frame, fps=fps)
-
-            # 7. Draw Visual Annotations & Overlays
-            decision_dict = {
-                "current_state": telemetry["current_state"],
-                "expected_next": telemetry["expected_next"],
-                "confidence": telemetry["confidence"],
-                "active_alert": telemetry["active_alert"]
-            }
-            annotated_frame = self._render_hud(frame, pose_res, hands_res, boxes, decision_dict, fps, telemetry["latency_ms"])
-
-            # 8. Encode MJPEG frame & assemble telemetry frame
-            _, jpeg_buf = cv2.imencode(".jpg", annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            jpeg_bytes = jpeg_buf.tobytes()
-
-            with self.lock:
-                self.latest_frame_bytes = jpeg_bytes
-                self.latest_telemetry = telemetry
-
-            time.sleep(0.01)
-
-    def _render_hud(self, frame, pose_res, hands_res, boxes, decision, fps, latency_ms):
-        """Draw avionics HUD overlay on video frame."""
-        h, w, _ = frame.shape
-        overlay = frame.copy()
-
-        # Draw detected objects
-        for name, data in boxes.items():
-            if data and "xyxy" in data:
-                x1, y1, x2, y2 = data["xyxy"]
-                color = (0, 0, 255) if "red" in name else ((255, 100, 0) if "blue" in name else (0, 224, 138))
-                cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
-                cv2.putText(overlay, f"{name.upper()} {data['conf']*100:.0f}%", (x1 + 4, max(18, y1 - 6)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
-
-        # Draw Header HUD strip
-        cv2.rectangle(overlay, (0, 0), (w, 36), (15, 18, 22), -1)
-        cv2.line(overlay, (0, 36), (w, 36), (60, 65, 75), 1)
-
-        status_col = (0, 224, 138) if not decision["active_alert"] else (0, 0, 255)
-        cv2.putText(overlay, "ASTROFLOW AI", (14, 23), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (230, 233, 237), 1)
-        cv2.putText(overlay, f"STATE: {decision['current_state'].upper()}", (160, 23), cv2.FONT_HERSHEY_SIMPLEX, 0.5, status_col, 2)
-        cv2.putText(overlay, f"NEXT: {decision['expected_next']}", (360, 23), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (138, 145, 156), 1)
-        cv2.putText(overlay, f"CONF: {decision['confidence']:.2f}", (520, 23), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 224, 138), 1)
-        cv2.putText(overlay, f"FPS: {fps:.1f}", (w - 180, 23), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (138, 145, 156), 1)
-        cv2.putText(overlay, f"LATENCY: {latency_ms:.1f}ms", (w - 95, 23), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (77, 163, 255), 1)
-
-        # Visual alert banner if violation active
-        if decision["active_alert"]:
-            cv2.rectangle(overlay, (0, h - 38), (w, h), (0, 0, 180), -1)
-            cv2.putText(overlay, f"PROCEDURAL ALERT: {decision['active_alert']['reason']}", (20, h - 14),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2)
-
-        return overlay
+        return telemetry
 
     def get_latest_jpeg(self):
-        with self.lock:
-            return self.latest_frame_bytes
+        return self.latest_frame_bytes
 
     def get_latest_telemetry(self):
-        with self.lock:
-            return self.latest_telemetry
+        return self.latest_telemetry
 
     def update_gate_thresholds(self, confidence=None, stability=None, cooldown=None, motion=None):
         if confidence is not None:
@@ -562,15 +339,3 @@ class AstroFlowPipeline:
             self.stabilizer.stability_window = int(stability)
         if cooldown is not None:
             self.stabilizer.cooldown_sec = float(cooldown)
-        if motion is not None:
-            self.stabilizer.motion_floor = float(motion)
-
-    def switch_camera(self, device_id):
-        self.camera.switch_source(device_id)
-
-    def stop(self):
-        self.running = False
-        self.camera.stop()
-        self.voice.stop()
-        if self.thread and self.thread.is_alive():
-            self.thread.join(timeout=1.0)

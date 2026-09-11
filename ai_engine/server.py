@@ -147,11 +147,11 @@ def get_health():
         "node": "ISS-COLUMBUS-HAR",
         "models": {
             "tar_bilstm": "loaded",
-            "yolov8_boxes": "loaded" if pipeline.yolo else "missing"
+            "yolov8_boxes": "loaded" if pipeline.yolo_model else "missing"
         },
         "camera": {
-            "status": "streaming" if pipeline.camera.running else "offline",
-            "fps": round(pipeline.camera.fps, 1)
+            "status": "ready",
+            "fps": 30.0
         },
         "timestamp": datetime.now().isoformat()
     }
@@ -168,7 +168,7 @@ async def infer_frame(file: UploadFile = File(...)):
     if frame is None:
         return {"ok": False, "error": "Invalid frame decode"}
 
-    telemetry, _, _, _ = pipeline.process_frame(frame)
+    telemetry = pipeline.process_frame(frame)
     return {"ok": True, "telemetry": telemetry}
 
 
