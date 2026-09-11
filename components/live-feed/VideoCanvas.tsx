@@ -82,11 +82,11 @@ export function VideoCanvas() {
           src="/video_feed"
           alt="Live Camera Feed"
           className="absolute inset-0 w-full h-full object-cover z-0"
-          onError={(e) => {
-            (e.currentTarget as HTMLElement).style.display = "none";
+          onError={({ currentTarget }) => {
+            currentTarget.style.display = "none";
           }}
-          onLoad={(e) => {
-            (e.currentTarget as HTMLElement).style.display = "block";
+          onLoad={({ currentTarget }) => {
+            currentTarget.style.display = "block";
           }}
         />
 

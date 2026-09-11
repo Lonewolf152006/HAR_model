@@ -283,7 +283,7 @@ export function useTelemetryStream() {
 
   // Live WebSocket Backend Connection
   const [isLiveBackendConnected, setIsLiveBackendConnected] = useState<boolean>(false);
-  const [liveTelemetry, setLiveTelemetry] = useState<any>(null);
+  const [liveTelemetry, setLiveTelemetry] = useState<Partial<TelemetryFrame> | null>(null);
 
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -311,7 +311,7 @@ export function useTelemetryStream() {
                 window.speechSynthesis.speak(utterance);
               }
             }
-          } catch (e) {
+          } catch {
             // ignore malformed frame
           }
         };
@@ -325,7 +325,7 @@ export function useTelemetryStream() {
           setIsLiveBackendConnected(false);
           if (ws) ws.close();
         };
-      } catch (err) {
+      } catch {
         setIsLiveBackendConnected(false);
         timer = setTimeout(connectWs, 2500);
       }

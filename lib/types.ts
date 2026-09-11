@@ -64,6 +64,8 @@ export interface TelemetryFrame {
   active_alert: ActiveAlertState | null;
   latency_ms: number;
   fps: number;
+  confidence_history?: number[];
+  cycles_completed?: number;
 }
 
 export type LogLevel = "ACCEPTED" | "REJECTED" | "ALERT" | "CONTAINMENT" | "INFO";

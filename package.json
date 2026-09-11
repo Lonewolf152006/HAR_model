@@ -4,9 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:all": "bun run scripts/dev-all.mjs",
+    "dev:ai": "uvicorn ai_engine.server:app --host 0.0.0.0 --port 8080",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:backend": "python -m unittest discover -s tests -p \"test_*.py\""
   },
   "dependencies": {
     "lucide-react": "^1.43.0",
