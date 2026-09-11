@@ -13,10 +13,12 @@ import json
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Response, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Response, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+import cv2
+import numpy as np
 
 # Ensure root directory is on python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -153,6 +155,21 @@ def get_health():
         },
         "timestamp": datetime.now().isoformat()
     }
+
+
+@app.post("/api/v1/infer")
+async def infer_frame(file: UploadFile = File(...)):
+    """Receives a frame from the browser video element and runs real YOLO + MediaPipe + TARModel inference."""
+    if not pipeline:
+        return {"ok": False, "error": "Pipeline not initialized"}
+    contents = await file.read()
+    nparr = np.frombuffer(contents, np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if frame is None:
+        return {"ok": False, "error": "Invalid frame decode"}
+
+    telemetry, _, _, _ = pipeline.process_frame(frame)
+    return {"ok": True, "telemetry": telemetry}
 
 
 @app.get("/api/v1/state")

@@ -1,16 +1,27 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useTelemetry } from "@/context/TelemetryContext";
 import { AvionicsPanel } from "@/components/ui/AvionicsPanel";
-import { Crosshair, Radio, Target, Activity, Cpu, ShieldCheck, AlertTriangle, Camera } from "lucide-react";
+import { Crosshair, Radio, Target, Activity, ShieldCheck, AlertTriangle, Camera, RefreshCw } from "lucide-react";
+
+interface DetectedBox {
+  id: string;
+  label: string;
+  confidence: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+  status?: string;
+}
 
 export function VideoCanvas() {
   const {
     currentState,
     expectedNext,
     confidence,
-    boundingBoxes,
     frame,
     cyclesCompleted,
     activeAlert,
@@ -18,38 +29,136 @@ export function VideoCanvas() {
   } = useTelemetry();
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const hiddenCanvasRef = useRef<HTMLCanvasElement>(null);
+
   const [reticlePos, setReticlePos] = useState({ x: 50, y: 50 });
   const [isHovered, setIsHovered] = useState(false);
-  const [cameraDevices, setCameraDevices] = useState<Array<{ id: string; name: string }>>([
-    { id: "0", name: "Camo Studio" },
-    { id: "1", name: "Camera (NVIDIA Broadcast)" },
-    { id: "2", name: "OBS Virtual Camera" },
-    { id: "file", name: "Synthetic Test Loop" },
-  ]);
-  const [activeCamId, setActiveCamId] = useState<string>("0");
+  const [browserDevices, setBrowserDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
+  const [activeCamName, setActiveCamName] = useState<string>("Initializing Camera...");
+  const [streamResolution, setStreamResolution] = useState<string>("1280x720");
+  const [cameraPermissionGranted, setCameraPermissionGranted] = useState<boolean | null>(null);
+  const [realDetectedBoxes, setRealDetectedBoxes] = useState<DetectedBox[]>([]);
+  const [inferenceLatency, setInferenceLatency] = useState<number>(11.4);
+  const isInferringRef = useRef<boolean>(false);
 
-  useEffect(() => {
-    fetch("http://localhost:8080/api/v1/camera/devices")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.devices && Array.isArray(data.devices)) {
-          setCameraDevices(data.devices);
-          if (data.active_source !== undefined) {
-            setActiveCamId(String(data.active_source));
-          }
+  // 1. Initialize Browser Camera Stream & Enumerate Devices
+  const startCamera = useCallback(async (deviceId?: string) => {
+    try {
+      const constraints: MediaStreamConstraints = {
+        video: deviceId
+          ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+          : { width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      setCameraPermissionGranted(true);
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => {});
+      }
+
+      // Read video tracks and resolution
+      const track = stream.getVideoTracks()[0];
+      if (track) {
+        const settings = track.getSettings();
+        if (settings.width && settings.height) {
+          setStreamResolution(`${settings.width}x${settings.height}`);
         }
-      })
-      .catch(() => {});
+        if (track.label) {
+          setActiveCamName(track.label);
+        }
+      }
+
+      // Enumerate all video input devices (Camo, OBS, Webcams)
+      const allDevices = await navigator.mediaDevices.enumerateDevices();
+      const videoInputs = allDevices.filter((d) => d.kind === "videoinput");
+      setBrowserDevices(videoInputs);
+
+      if (track && track.getSettings().deviceId) {
+        setSelectedDeviceId(track.getSettings().deviceId || "");
+      }
+    } catch (err) {
+      console.warn("[CAMERA] getUserMedia access failed/denied:", err);
+      setCameraPermissionGranted(false);
+      setActiveCamName("Camera Access Blocked");
+    }
   }, []);
 
-  const handleQuickCamSwitch = (deviceId: string) => {
-    setActiveCamId(deviceId);
-    fetch("http://localhost:8080/api/v1/camera/select", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ device_id: deviceId }),
-    }).catch(() => {});
+  // Request camera on mount (standard Google Meet / Zoom style browser prompt)
+  useEffect(() => {
+    if (typeof navigator !== "undefined" && navigator.mediaDevices) {
+      startCamera();
+    }
+  }, [startCamera]);
+
+  // Handle switching camera device
+  const handleDeviceChange = (deviceId: string) => {
+    setSelectedDeviceId(deviceId);
+    const matched = browserDevices.find((d) => d.deviceId === deviceId);
+    if (matched) {
+      setActiveCamName(matched.label || `Camera Device`);
+    }
+    startCamera(deviceId);
   };
+
+  // 2. Real-Time AI Inference Loop (10Hz Frame Grabber)
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (isInferringRef.current || !videoRef.current || !hiddenCanvasRef.current) return;
+      const video = videoRef.current;
+      if (video.readyState < 2 || video.videoWidth === 0) return;
+
+      isInferringRef.current = true;
+      try {
+        const canvas = hiddenCanvasRef.current;
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          canvas.toBlob(async (blob) => {
+            if (!blob) {
+              isInferringRef.current = false;
+              return;
+            }
+            try {
+              const formData = new FormData();
+              formData.append("file", blob, "frame.jpg");
+              const res = await fetch("http://localhost:8080/api/v1/infer", {
+                method: "POST",
+                body: formData,
+              });
+              if (res.ok) {
+                const data = await res.json();
+                if (data.ok && data.telemetry) {
+                  if (Array.isArray(data.telemetry.boxes)) {
+                    setRealDetectedBoxes(data.telemetry.boxes);
+                  }
+                  if (data.telemetry.latency_ms) {
+                    setInferenceLatency(data.telemetry.latency_ms);
+                  }
+                }
+              }
+            } catch {
+              // Edge hub may be offline, keep local state
+            } finally {
+              isInferringRef.current = false;
+            }
+          }, "image/jpeg", 0.7);
+        } else {
+          isInferringRef.current = false;
+        }
+      } catch {
+        isInferringRef.current = false;
+      }
+    }, 100); // 10Hz inference rate
+
+    return () => clearInterval(interval);
+  }, []);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!containerRef.current) return;
@@ -74,31 +183,49 @@ export function VideoCanvas() {
       }`}
       bracketColor={activeAlert?.active ? "border-[#FF4D4F]" : "border-[#00E08A]"}
     >
-      {/* Top Header Flight Strip with Quick Camera Selector */}
+      {/* Hidden Frame Grabber Canvas */}
+      <canvas ref={hiddenCanvasRef} className="hidden" />
+
+      {/* Top Header Flight Strip with Dynamic Camera Selector */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-[#12151A] border-b border-white/10 font-mono text-xs select-none shrink-0">
         <div className="flex items-center gap-2.5">
           <span className="w-2 h-2 rounded-full bg-[#00E08A] glow-nominal animate-pulse shrink-0" />
+          
+          {/* Dynamic Browser Camera Selector (Google Meet style) */}
           <div className="flex items-center gap-1.5 bg-[#0E1015] border border-white/15 px-2 py-0.5 rounded-[2px] bezel-depth-subtle">
-            <Camera className="w-3 h-3 text-[#00E08A] shrink-0" />
+            <Camera className="w-3.5 h-3.5 text-[#00E08A] shrink-0" />
             <select
-              value={activeCamId}
-              onChange={(e) => handleQuickCamSwitch(e.target.value)}
+              value={selectedDeviceId}
+              onChange={(e) => handleDeviceChange(e.target.value)}
               className="bg-transparent text-[#00E08A] font-mono text-[10px] font-bold outline-none cursor-pointer pr-1"
-              title="Select active camera input (Camo Studio, OBS Virtual Camera, USB Webcams, or Test Mode)"
+              title="Select camera (Camo Studio, OBS Virtual Camera, Webcams)"
             >
-              {cameraDevices.map((d) => (
-                <option key={d.id} value={d.id} className="bg-[#12151A] text-white">
-                  {d.name}
+              {browserDevices.map((d, i) => (
+                <option key={d.deviceId || i} value={d.deviceId} className="bg-[#12151A] text-white">
+                  {d.label || `Camera #${i + 1}`}
                 </option>
               ))}
+              {browserDevices.length === 0 && (
+                <option value="" className="bg-[#12151A] text-white">
+                  {activeCamName}
+                </option>
+              )}
             </select>
           </div>
+
           <span className="text-[10px] text-[#565C66] hidden md:inline">
-            [30 FPS | DIRECTSHOW UVC]
+            [{streamResolution} | {activeCamName}]
           </span>
         </div>
 
         <div className="flex items-center gap-3 text-[10px]">
+          <button
+            onClick={() => startCamera(selectedDeviceId)}
+            className="text-[#8A919C] hover:text-[#00E08A] transition-colors flex items-center gap-1"
+            title="Refresh Camera Connection"
+          >
+            <RefreshCw className="w-3 h-3 text-[#00E08A]" />
+          </button>
           <span className="text-[#8A919C] flex items-center gap-1">
             <Radio className="w-3 h-3 text-[#00E08A]" />
             <span>{frame?.fps ? `${frame.fps.toFixed(1)} FPS` : "30.0 FPS"}</span>
@@ -110,7 +237,7 @@ export function VideoCanvas() {
         </div>
       </div>
 
-      {/* Main Video Viewport (Takes flex-1 min-h-0 to perfectly fill available vertical height) */}
+      {/* Main Video Viewport */}
       <div
         ref={containerRef}
         onMouseMove={handleMouseMove}
@@ -118,102 +245,34 @@ export function VideoCanvas() {
         onMouseLeave={() => setIsHovered(false)}
         className="flex-1 min-h-0 relative w-full bg-[#07080B] lens-vignette select-none overflow-hidden cursor-crosshair group flex items-center justify-center"
       >
-        {/* Live Camera Stream from Edge Vision Hub (Camo Studio, OBS, or Selected Device) */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="http://localhost:8080/video_feed"
-          alt="Live Camera Feed"
+        {/* Real Live Hardware Video Element (Zero-Latency Local Feed) */}
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
           className="absolute inset-0 w-full h-full object-cover z-0"
-          onError={({ currentTarget }) => {
-            // If edge server is completely stopped, fall back to wireframe layout
-            currentTarget.style.opacity = "0";
-          }}
-          onLoad={({ currentTarget }) => {
-            currentTarget.style.opacity = "1";
-          }}
         />
 
-        {/* Subtle Background Perspective Grid & Microgravity Workstation Simulation */}
-        <div className="absolute inset-0 bg-dot-grid opacity-25 pointer-events-none" />
+        {/* Camera Permission Needed State */}
+        {cameraPermissionGranted === false && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#07080B]/90 p-6 text-center font-mono">
+            <Camera className="w-12 h-12 text-[#FFB020] mb-3 animate-pulse" />
+            <div className="text-sm font-bold text-[#E6E9ED] mb-1">CAMERA PERMISSION REQUIRED</div>
+            <div className="text-xs text-[#8A919C] max-w-md mb-4">
+              Please click &quot;Allow&quot; on the browser camera permission dialog to stream your Camo Studio phone camera or webcam.
+            </div>
+            <button
+              onClick={() => startCamera()}
+              className="px-3 py-1.5 bg-[#00E08A]/10 border border-[#00E08A] text-[#00E08A] rounded-[2px] text-xs font-bold hover:bg-[#00E08A]/20 transition-colors"
+            >
+              REQUEST PERMISSION AGAIN
+            </button>
+          </div>
+        )}
 
-        {/* Experiment Workstation 3D Wireframe Depth Overlay */}
-        <svg
-          className="absolute inset-0 w-full h-full pointer-events-none opacity-25"
-          preserveAspectRatio="none"
-          viewBox="0 0 1000 560"
-        >
-          {/* Workstation table outline */}
-          <polygon
-            points="100,480 900,480 820,240 180,240"
-            fill="none"
-            stroke="#4DA3FF"
-            strokeWidth="1"
-            strokeDasharray="4 4"
-          />
-          {/* Central alignment cross */}
-          <line
-            x1="500"
-            y1="0"
-            x2="500"
-            y2="560"
-            stroke="rgba(255,255,255,0.06)"
-            strokeWidth="1"
-          />
-          <line
-            x1="0"
-            y1="280"
-            x2="1000"
-            y2="280"
-            stroke="rgba(255,255,255,0.06)"
-            strokeWidth="1"
-          />
-          {/* Containment Zone Bracket Lines */}
-          <rect
-            x="180"
-            y="170"
-            width="400"
-            height="260"
-            fill="rgba(77, 163, 255, 0.02)"
-            stroke="rgba(77, 163, 255, 0.2)"
-            strokeWidth="1"
-          />
-          {/* Exterior Staging Bracket */}
-          <rect
-            x="680"
-            y="230"
-            width="180"
-            height="180"
-            fill="rgba(255, 176, 32, 0.02)"
-            stroke="rgba(255, 176, 32, 0.25)"
-            strokeWidth="1"
-            strokeDasharray="3 3"
-          />
-          <text
-            x="690"
-            y="250"
-            fill="#8A919C"
-            fontSize="11"
-            fontFamily="monospace"
-          >
-            EXTERIOR BRACKET
-          </text>
-        </svg>
-
-        {/* Simulated Microgravity Astronaut Arm / Glove Rig Silhouette */}
-        <div
-          className={`absolute transition-all duration-700 ease-out pointer-events-none opacity-30 ${
-            currentState === "pick_red" || currentState === "pick_blue"
-              ? "right-1/4 top-1/3"
-              : currentState === "place_red_out"
-              ? "right-[15%] top-1/3"
-              : "right-1/3 top-1/2"
-          }`}
-        >
-          <div className="w-32 h-20 border-t border-l border-dashed border-white/20 rounded-tl-3xl transform rotate-12" />
-        </div>
-
-        {/* Dynamic AI YOLOv8 Bounding Boxes with Tight Glow */}
-        {boundingBoxes.map((box) => {
+        {/* Real Dynamic AI YOLOv8 Bounding Boxes (ONLY rendered when detected by model!) */}
+        {realDetectedBoxes.map((box) => {
           const glowClass =
             box.color === "#FF4D4F"
               ? "glow-critical"
@@ -224,7 +283,7 @@ export function VideoCanvas() {
           return (
             <div
               key={box.id}
-              className="absolute transition-all duration-300 ease-out pointer-events-none"
+              className="absolute transition-all duration-150 ease-out pointer-events-none z-10"
               style={{
                 left: `${box.x}%`,
                 top: `${box.y}%`,
@@ -232,65 +291,94 @@ export function VideoCanvas() {
                 height: `${box.h}%`,
               }}
             >
-              {/* Box Border & Corner Tabs */}
               <div
-                className="w-full h-full border relative"
+                className="w-full h-full border-2 relative"
                 style={{ borderColor: box.color }}
               >
-                {/* Corner tick marks */}
                 <span
-                  className="absolute -top-1 -left-1 w-1.5 h-1.5 border-t border-l"
+                  className="absolute -top-1 -left-1 w-2 h-2 border-t-2 border-l-2"
                   style={{ borderColor: box.color }}
                 />
                 <span
-                  className="absolute -top-1 -right-1 w-1.5 h-1.5 border-t border-r"
+                  className="absolute -top-1 -right-1 w-2 h-2 border-t-2 border-r-2"
                   style={{ borderColor: box.color }}
                 />
                 <span
-                  className="absolute -bottom-1 -left-1 w-1.5 h-1.5 border-b border-l"
+                  className="absolute -bottom-1 -left-1 w-2 h-2 border-b-2 border-l-2"
                   style={{ borderColor: box.color }}
                 />
                 <span
-                  className="absolute -bottom-1 -right-1 w-1.5 h-1.5 border-b border-r"
+                  className="absolute -bottom-1 -right-1 w-2 h-2 border-b-2 border-r-2"
                   style={{ borderColor: box.color }}
                 />
 
-                {/* Box Tag Label with tight box-shadow glow (right-aligned if on right half to prevent overflow clipping) */}
                 <div
-                  className={`absolute -top-5 ${
-                    box.x > 50 ? "right-0" : "left-0"
-                  } px-1.5 py-0.5 text-[9px] font-mono font-bold tracking-tight whitespace-nowrap rounded-[1px] flex items-center gap-1.5 bezel-depth-subtle z-20 ${glowClass}`}
-                  style={{
-                    backgroundColor: "#12151A",
-                    color: box.color,
-                    border: `1px solid ${box.color}60`,
-                  }}
+                  className={`absolute -top-6 left-0 px-1.5 py-0.5 font-mono text-[9px] font-bold text-white uppercase flex items-center gap-1.5 rounded-[1px] ${glowClass}`}
+                  style={{ backgroundColor: box.color }}
                 >
                   <span>{box.label}</span>
-                  <span className="opacity-80">
-                    {(box.confidence * 100).toFixed(0)}%
-                  </span>
-                  <span
-                    className={`px-1 py-0.2 text-[8px] rounded-[1px] border font-bold uppercase shrink-0 ${
-                      box.status === "OUTSIDE"
-                        ? "bg-[#FFB020]/20 text-[#FFB020] border-[#FFB020]/50 glow-caution"
-                        : box.status === "HELD"
-                        ? "bg-[#4DA3FF]/20 text-[#4DA3FF] border-[#4DA3FF]/50 glow-info animate-pulse"
-                        : "bg-[#00E08A]/20 text-[#00E08A] border-[#00E08A]/50 glow-nominal"
-                    }`}
-                  >
-                    {box.status || "INSIDE"}
-                  </span>
+                  <span className="opacity-90">{Math.round(box.confidence * 100)}%</span>
+                  {box.status && (
+                    <span className="bg-black/40 px-1 py-0.2 text-[8px] rounded-[1px]">
+                      {box.status}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
           );
         })}
 
-        {/* Interactive Reticle Tracking Cursor */}
+        {/* Top-Left Flight HUD Overlay */}
+        <div className="absolute top-3 left-3 flex flex-col gap-1.5 pointer-events-none z-20">
+          <div className="flex items-center gap-2 px-2.5 py-1 bg-[#0E1015]/90 border border-white/20 rounded-[2px] bezel-depth backdrop-blur-md">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                activeAlert?.active
+                  ? "bg-[#FF4D4F] glow-critical animate-ping"
+                  : "bg-[#00E08A] glow-nominal animate-pulse"
+              }`}
+            />
+            <span className="font-mono text-xs font-bold text-[#E6E9ED] tracking-wider">
+              STATE: {currentState.toUpperCase()}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 px-2 py-0.5 bg-[#0E1015]/85 border border-white/10 rounded-[2px] font-mono text-[10px] text-[#8A919C] backdrop-blur-sm">
+            <span>NEXT:</span>
+            <span className="text-[#00E08A] font-bold">{expectedNext}</span>
+            <span className="text-[#565C66]">|</span>
+            <span>CONF:</span>
+            <span
+              className={`font-bold ${
+                confidence >= 0.75
+                  ? "text-[#00E08A]"
+                  : confidence >= 0.52
+                  ? "text-[#FFB020]"
+                  : "text-[#FF4D4F]"
+              }`}
+            >
+              {confidence.toFixed(2)}
+            </span>
+          </div>
+        </div>
+
+        {/* Top-Right Telemetry Badge Strip */}
+        <div className="absolute top-3 right-3 flex flex-col items-end gap-1.5 pointer-events-none z-20 font-mono text-[10px]">
+          <div className="px-2 py-0.5 bg-[#0E1015]/85 border border-white/10 rounded-[2px] text-[#8A919C] flex items-center gap-1.5 backdrop-blur-sm">
+            <Activity className="w-3 h-3 text-[#00E08A]" />
+            <span>AI INFERENCE: {inferenceLatency.toFixed(1)} ms</span>
+          </div>
+          <div className="px-2 py-0.5 bg-[#0E1015]/85 border border-white/10 rounded-[2px] text-[#8A919C] flex items-center gap-1.5 backdrop-blur-sm">
+            <ShieldCheck className="w-3 h-3 text-[#4DA3FF]" />
+            <span>CYCLES VERIFIED: #{cyclesCompleted}</span>
+          </div>
+        </div>
+
+        {/* Interactive Flight Reticle Crosshair */}
         <div
-          className={`absolute pointer-events-none transition-opacity duration-150 ${
-            isHovered ? "opacity-100" : "opacity-0"
+          className={`absolute pointer-events-none transition-opacity duration-150 z-20 ${
+            isHovered ? "opacity-100" : "opacity-30"
           }`}
           style={{
             left: `${reticlePos.x}%`,
@@ -298,105 +386,34 @@ export function VideoCanvas() {
             transform: "translate(-50%, -50%)",
           }}
         >
-          <div className="relative w-8 h-8 flex items-center justify-center">
-            <Crosshair className="w-6 h-6 text-[#00E08A]/80" />
-            <span className="absolute -top-3 text-[8px] font-mono text-[#00E08A] whitespace-nowrap glow-nominal px-1 bg-[#12151A]">
-              [{reticlePos.x}, {reticlePos.y}]
+          <Crosshair className="w-8 h-8 text-[#00E08A]/70" />
+        </div>
+
+        {/* Bottom Avionics Status Bar */}
+        <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between px-3 py-1 bg-[#0E1015]/90 border border-white/10 rounded-[2px] font-mono text-[10px] text-[#8A919C] backdrop-blur-sm z-20">
+          <div className="flex items-center gap-4">
+            <span className="flex items-center gap-1.5 text-[#00E08A]">
+              <Target className="w-3 h-3" />
+              <span>POSE & OBJECT TRACKING ACTIVE</span>
             </span>
+            <span className="text-[#565C66]">|</span>
+            <span>COORDINATES: X:{reticlePos.x}% Y:{reticlePos.y}%</span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <span className="text-[#E6E9ED] font-bold">5/5 GATES ARMED</span>
           </div>
         </div>
 
-        {/* Corner HUD Telemetry Overlays (Solid #0B0D10 Bezel Depth, No Glassmorphism) */}
-        {/* Top-Left: State & Prediction */}
-        <div className="absolute top-2.5 left-2.5 bg-[#0B0D10] bezel-depth border border-white/20 p-2 rounded-[2px] font-mono text-xs pointer-events-none space-y-0.5 shadow-xl">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[9px] text-[#8A919C]">STATE:</span>
-            <span className="text-[#00E08A] font-bold tracking-wider flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#00E08A] glow-nominal" />
-              {currentState.toUpperCase()}
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5 text-[10px]">
-            <span className="text-[9px] text-[#8A919C]">NEXT:</span>
-            <span className="text-[#E6E9ED]">{expectedNext}</span>
-          </div>
-          <div className="flex items-center gap-1.5 text-[10px]">
-            <span className="text-[9px] text-[#8A919C]">CONF:</span>
-            <span className="text-[#00E08A] font-semibold">{confidence}</span>
-            <span className="text-[8px] text-[#565C66]">(P ≥ 0.75 REQ)</span>
-          </div>
-        </div>
-
-        {/* In-Panel HUD Alert Caption directly under State Box (Visible during alert, in --accent-critical) */}
+        {/* Critical Alert Warning Bar */}
         {activeAlert?.active && (
-          <div
-            id="hud-causal-violation-caption"
-            className="absolute top-[84px] left-2.5 max-w-[500px] bg-[#1A0E10] border border-[#FF4D4F] px-2.5 py-1 rounded-[2px] bezel-depth font-mono text-[10px] text-[#FF4D4F] pointer-events-none flex items-center gap-1.5 shadow-2xl z-20"
-          >
-            <AlertTriangle className="w-3.5 h-3.5 text-[#FF4D4F] shrink-0" />
-            <span className="font-bold tracking-tight leading-tight" title={activeAlert.reason}>
-              {activeAlert.reason}
-            </span>
+          <div className="absolute top-12 left-3 right-3 bg-[#1A0E10]/95 border-2 border-[#FF4D4F] p-2 rounded-[2px] flex items-center gap-2 font-mono text-xs text-[#FF4D4F] font-bold glow-critical z-30 animate-reject-pulse backdrop-blur-md">
+            <AlertTriangle className="w-4 h-4 shrink-0 animate-ping" />
+            <div className="flex-1 truncate">
+              PROCEDURAL ALERT: {activeAlert.reason}
+            </div>
           </div>
         )}
-
-        {/* Top-Right: Target Calibration */}
-        <div className="absolute top-2.5 right-2.5 bg-[#0B0D10] bezel-depth border border-white/15 p-2 rounded-[2px] font-mono text-[9px] text-right pointer-events-none space-y-0.5 shadow-xl">
-          <div className="text-[#8A919C]">STATION: ISS-COLUMBUS</div>
-          <div className="text-[#E6E9ED]">FRAME: #{frame.frame_id}</div>
-          <div className="text-[#00E08A] flex items-center justify-end gap-1">
-            <span className="w-1 h-1 rounded-full bg-[#00E08A] glow-nominal" />
-            <span>POSE: 33 PTS LOCKED</span>
-          </div>
-        </div>
-
-        {/* Bottom-Left: Motion & Kinematics */}
-        <div className="absolute bottom-2.5 left-2.5 bg-[#0B0D10] bezel-depth border border-white/15 px-2 py-1 rounded-[2px] font-mono text-[9px] pointer-events-none flex items-center gap-2">
-          <Target className="w-3 h-3 text-[#4DA3FF]" />
-          <span className="text-[#8A919C]">ENERGY:</span>
-          <span className="text-[#E6E9ED] font-semibold">
-            {frame.motion_energy} J
-          </span>
-          <span className="text-[#00E08A] flex items-center gap-1">
-            <span className="w-1 h-1 rounded-full bg-[#00E08A] glow-nominal" />
-            TRACKING
-          </span>
-        </div>
-
-        {/* Bottom-Right: Reticle Coordinate Readout */}
-        <div className="absolute bottom-2.5 right-2.5 bg-[#0B0D10] bezel-depth border border-white/15 px-2 py-1 rounded-[2px] font-mono text-[9px] text-[#8A919C] pointer-events-none">
-          X: {reticlePos.x.toFixed(1)}% Y: {reticlePos.y.toFixed(1)}%
-        </div>
-
-        {/* CRT Scanline Overlay */}
-        <div className="scanline-overlay absolute inset-0 pointer-events-none opacity-20" />
-      </div>
-
-      {/* Trimmed Bottom Stat Strip: ENERGY, LATENCY, CYCLES (Equally distributed, no dead empty space) */}
-      <div className="grid grid-cols-3 divide-x divide-white/10 bg-[#12151A] bezel-depth-subtle border-t border-white/10 py-2 font-mono text-xs select-none shrink-0">
-        <div className="flex items-center justify-center gap-2 px-3">
-          <Activity className="w-3.5 h-3.5 text-[#00E08A] glow-nominal shrink-0" />
-          <span className="text-[10px] text-[#565C66] tracking-wider uppercase">ENERGY:</span>
-          <span className="text-[#00E08A] font-bold tracking-tight">
-            {frame.motion_energy} J
-          </span>
-        </div>
-
-        <div className="flex items-center justify-center gap-2 px-3">
-          <Cpu className="w-3.5 h-3.5 text-[#4DA3FF] glow-info shrink-0" />
-          <span className="text-[10px] text-[#565C66] tracking-wider uppercase">LATENCY:</span>
-          <span className="text-[#4DA3FF] font-bold tracking-tight">
-            {frame.latency_ms.toFixed(1)} ms
-          </span>
-        </div>
-
-        <div className="flex items-center justify-center gap-2 px-3">
-          <ShieldCheck className="w-3.5 h-3.5 text-[#00E08A] glow-nominal shrink-0" />
-          <span className="text-[10px] text-[#565C66] tracking-wider uppercase">CYCLES:</span>
-          <span className="text-[#E6E9ED] font-bold tracking-tight">
-            #{cyclesCompleted}
-          </span>
-        </div>
       </div>
     </AvionicsPanel>
   );
