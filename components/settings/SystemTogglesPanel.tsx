@@ -3,7 +3,7 @@
 import React from "react";
 import { AvionicsPanel } from "@/components/ui/AvionicsPanel";
 import { useTelemetry } from "@/context/TelemetryContext";
-import { Volume2, VolumeX, Sparkles, Terminal, ToggleLeft, ToggleRight } from "lucide-react";
+import { Volume2, VolumeX, Sparkles, Terminal } from "lucide-react";
 
 export function SystemTogglesPanel() {
   const {

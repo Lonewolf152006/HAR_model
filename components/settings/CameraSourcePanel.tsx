@@ -5,7 +5,7 @@ import { AvionicsPanel } from "@/components/ui/AvionicsPanel";
 import { useTelemetry } from "@/context/TelemetryContext";
 import { CAMERA_SOURCES } from "@/lib/constants";
 import { CameraSourceId } from "@/lib/types";
-import { Camera, Check, Cpu } from "lucide-react";
+import { Camera, Check } from "lucide-react";
 
 export function CameraSourcePanel() {
   const { cameraSource, setCameraSource } = useTelemetry();

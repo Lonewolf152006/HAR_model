@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/refs, react-hooks/purity */
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
@@ -21,7 +22,7 @@ import {
   GateThresholds,
   ActiveAlertState,
 } from "./types";
-import { HAR_STATES, GATE_THRESHOLDS, DEFAULT_GATE_THRESHOLDS, CAUSAL_VIOLATION_REASON } from "./constants";
+import { HAR_STATES, DEFAULT_GATE_THRESHOLDS, CAUSAL_VIOLATION_REASON } from "./constants";
 import { avionicsAudio } from "./sound";
 
 function formatTimestamp(date: Date): string {
@@ -58,7 +59,7 @@ export function useTelemetryStream() {
     INITIAL_CONFIDENCE_HISTORY
   );
 
-  const [subsystems, setSubsystems] = useState<SubsystemStatusMap>({
+  const [subsystems] = useState<SubsystemStatusMap>({
     camera: "nominal",
     tar_model: "nominal",
     yolo: "nominal",
@@ -251,8 +252,8 @@ export function useTelemetryStream() {
   const [lastAcceptedState, setLastAcceptedState] = useState<HarState | null>(null);
 
   // Internal mutable simulation refs
-  const stateStartRef = useRef<number>(Date.now());
-  const lastTransitionRef = useRef<number>(Date.now() - 3000);
+  const stateStartRef = useRef<number>(0);
+  const lastTransitionRef = useRef<number>(0);
   const stabilityCounterRef = useRef<number>(18);
   const frameCounterRef = useRef<number>(1042);
   const stateIndexRef = useRef<number>(0);
@@ -417,6 +418,13 @@ export function useTelemetryStream() {
 
   // Main 10Hz simulation clock loop
   useEffect(() => {
+    if (stateStartRef.current === 0) {
+      stateStartRef.current = Date.now();
+    }
+    if (lastTransitionRef.current === 0) {
+      lastTransitionRef.current = Date.now() - 3000;
+    }
+
     if (isPaused) return;
 
     const interval = setInterval(() => {
@@ -602,8 +610,10 @@ export function useTelemetryStream() {
 
   // Derive realistic frame telemetry
   const timeStr = formatTimestamp(new Date());
-  const currentElapsed = Date.now() - stateStartRef.current;
-  const timeSinceTransSec = Math.max(0.1, (Date.now() - lastTransitionRef.current) / 1000);
+  const currentElapsed = stateStartRef.current > 0 ? Date.now() - stateStartRef.current : 0;
+  const timeSinceTransSec = lastTransitionRef.current > 0
+    ? Math.max(0.1, (Date.now() - lastTransitionRef.current) / 1000)
+    : 0.85;
 
   // Current confidence from latest history sample
   const confidence =

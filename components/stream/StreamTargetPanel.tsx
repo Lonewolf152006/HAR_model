@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { AvionicsPanel } from "@/components/ui/AvionicsPanel";
 import { useTelemetry } from "@/context/TelemetryContext";
-import { Radio, Wifi, WifiOff, RefreshCw, ShieldAlert } from "lucide-react";
+import { Wifi, WifiOff, RefreshCw, ShieldAlert } from "lucide-react";
 
 export function StreamTargetPanel() {
   const {

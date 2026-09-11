@@ -119,37 +119,31 @@ export function FlightPlanStrip() {
           {HAR_STATES.map((step, index) => {
             const isDone = index < currentIndex;
             const isActive = index === currentIndex;
-            const isPending = index > currentIndex;
             const isRejected = activeRejection?.step === step.id;
             const isJustAccepted = lastAcceptedState === step.id;
 
             // Step status styling
             let nodeBorder = "border-white/10";
             let nodeBg = "bg-[#171B21]";
-            let nodeText = "text-[#565C66]";
             let glowClass = "";
             let animationClass = "";
 
             if (isRejected) {
               nodeBorder = "border-[#FF4D4F]";
               nodeBg = "bg-[#FF4D4F]/10";
-              nodeText = "text-[#FF4D4F]";
               glowClass = "glow-critical";
               animationClass = "animate-reject-pulse";
             } else if (isJustAccepted) {
               nodeBorder = "border-[#00E08A]";
               nodeBg = "bg-[#00E08A]";
-              nodeText = "text-[#0B0D10]";
               animationClass = "animate-stamp-flash";
             } else if (isDone) {
               nodeBorder = "border-[#00E08A]/60";
               nodeBg = "bg-[#00E08A]/10";
-              nodeText = "text-[#00E08A]";
               glowClass = "glow-nominal";
             } else if (isActive) {
               nodeBorder = "border-[#FFB020]";
               nodeBg = "bg-[#FFB020]/10";
-              nodeText = "text-[#FFB020]";
               glowClass = "glow-caution";
             }
 

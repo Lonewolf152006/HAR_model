@@ -1,4 +1,3 @@
-import { NextRequest } from "next/server";
 import type { ApiResponse, StateSnapshot } from "../../../../lib/backend/types";
 
 // GET /api/v1/state
@@ -6,7 +5,7 @@ import type { ApiResponse, StateSnapshot } from "../../../../lib/backend/types";
 // real telemetry stream in a follow-up; it exists so the API contract is
 // documented and testable from day one.
 
-export function GET(_request: NextRequest): Response {
+export function GET(): Response {
   const snapshot: StateSnapshot = {
     currentState: "idle",
     expectedNext: "open_box",

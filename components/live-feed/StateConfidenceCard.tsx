@@ -5,7 +5,7 @@ import { AvionicsPanel } from "@/components/ui/AvionicsPanel";
 import { HarState } from "@/lib/types";
 import { STATE_MAP, GATE_THRESHOLDS } from "@/lib/constants";
 import { useTelemetry } from "@/context/TelemetryContext";
-import { ArrowRight, Clock, Activity, TrendingUp, AlertTriangle } from "lucide-react";
+import { ArrowRight, Activity } from "lucide-react";
 
 interface StateConfidenceCardProps {
   currentState: HarState;

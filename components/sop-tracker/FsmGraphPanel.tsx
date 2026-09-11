@@ -3,7 +3,7 @@
 import React from "react";
 import { AvionicsPanel } from "@/components/ui/AvionicsPanel";
 import { useTelemetry } from "@/context/TelemetryContext";
-import { GitCommit, ShieldAlert } from "lucide-react";
+import { GitCommit } from "lucide-react";
 
 interface GraphNode {
   id: string;
