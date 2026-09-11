@@ -349,8 +349,6 @@ export function useTelemetryStream() {
   const alertStartRef = useRef<number | null>(null);
   const alertExpiryRef = useRef<number | null>(null);
   const activeAlertRef = useRef<ActiveAlertState | null>(null);
-  const lastAlertFrameRef = useRef<number>(-1);
-  const lastRejectionFrameRef = useRef<number>(-1);
   const rejectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const currentStateDef = HAR_STATES[stateIndex];
@@ -572,54 +570,6 @@ export function useTelemetryStream() {
         };
       });
 
-      // Rare simulated Causal / FSM logic violation (~every 65s at 10Hz, e.g. illegal attempt during pick_red)
-      if (
-        curFrame > 1042 &&
-        (curFrame - 1042) % 650 === 180 &&
-        lastAlertFrameRef.current !== curFrame
-      ) {
-        lastAlertFrameRef.current = curFrame;
-        triggerCausalViolation(CAUSAL_VIOLATION_REASON);
-      }
-
-      // Occasional simulated routine DecisionStabilizer gate rejection (~every 45s at 10Hz, quiet hold, soft tone)
-      if (
-        curFrame > 1042 &&
-        (curFrame - 1042) % 450 === 270 &&
-        lastRejectionFrameRef.current !== curFrame &&
-        !activeAlertRef.current?.active &&
-        !activeAnomaly
-      ) {
-        lastRejectionFrameRef.current = curFrame;
-        const timeStr = formatTimestamp(new Date());
-        const isConfFail = curFrame % 2 === 0;
-        const rejReason = isConfFail
-          ? `GATE REJECTION: Low conf (0.67 < ${thresholds.confidence} threshold) — candidate held`
-          : `GATE REJECTION: Kinematic velocity stalled (0.07 < ${thresholds.motionFloor} min) — candidate held`;
-        const rejBadge = isConfFail
-          ? `Low conf (0.67 < ${thresholds.confidence})`
-          : `Velocity stalled (0.07 < ${thresholds.motionFloor})`;
-
-        setActiveRejection({
-          step: currentState,
-          reason: rejBadge,
-          timestamp: timeStr,
-        });
-        avionicsAudio.playRejectedTone();
-        appendLog({
-          timestamp: timeStr,
-          level: "REJECTED",
-          state: currentState,
-          reason: rejReason,
-          confidence: isConfFail ? 0.67 : +(0.80 + Math.random() * 0.05).toFixed(2),
-        });
-
-        if (rejectionTimeoutRef.current) clearTimeout(rejectionTimeoutRef.current);
-        rejectionTimeoutRef.current = setTimeout(() => {
-          setActiveRejection((prev) => (prev?.reason === rejBadge ? null : prev));
-        }, 3200);
-      }
-
       // Check alert hold state against stable wall-clock start/expiry
       // 8-10s minimum hold (10.0s), OR until next accepted transition, whichever is LONGER
       const isAlertHolding =
@@ -809,79 +759,16 @@ export function useTelemetryStream() {
 
   // Dynamic 2.5D bounding boxes tracking physical experiment state (status locked to containment)
   const boundingBoxes: BoundingBox[] = useMemo(() => {
-    let redX = 26;
-    let redY = 52;
-    let blueX = 39;
-    let blueY = 52;
-
-    if (currentState === "idle") {
-      redX = 27;
-      redY = 54;
-      blueX = 40;
-      blueY = 54;
-    } else if (currentState === "open_box") {
-      redX = 27;
-      redY = 52;
-      blueX = 40;
-      blueY = 52;
-    } else if (currentState === "pick_red") {
-      redX = 46;
-      redY = 38;
-      blueX = 40;
-      blueY = 52;
-    } else if (currentState === "place_red_out") {
-      redX = 72;
-      redY = 50;
-      blueX = 40;
-      blueY = 52;
-    } else if (currentState === "pick_blue") {
-      redX = 72;
-      redY = 50;
-      blueX = 46;
-      blueY = 38;
-    } else if (currentState === "place_blue_in" || currentState === "close_box") {
-      redX = 72;
-      redY = 50;
-      blueX = 28;
-      blueY = 52;
+    if (liveTelemetry?.boxes && Array.isArray(liveTelemetry.boxes)) {
+      return liveTelemetry.boxes;
     }
+    return [];
+  }, [liveTelemetry?.boxes]);
 
-    return [
-      {
-        id: "main_box",
-        label: "MAIN CONTAINER",
-        confidence: 0.94,
-        x: 20,
-        y: 34,
-        w: 38,
-        h: 44,
-        color: "#4DA3FF",
-        status: containment.main_box,
-      },
-      {
-        id: "red_box",
-        label: "RED CUBE [SAMPLE-A]",
-        confidence: +(0.88 + (frameId % 7) * 0.01).toFixed(2),
-        x: redX,
-        y: redY,
-        w: 12,
-        h: 15,
-        color: "#FF4D4F",
-        status: containment.red_box,
-      },
-      {
-        id: "blue_box",
-        label: "BLUE CUBE [SAMPLE-B]",
-        confidence: +(0.91 + (frameId % 5) * 0.01).toFixed(2),
-        x: blueX,
-        y: blueY,
-        w: 12,
-        h: 15,
-        color: "#00E08A",
-        status: containment.blue_box,
-      },
-    ];
-  }, [currentState, containment, frameId]);
+  const ingestRealTelemetry = useCallback((data: Partial<TelemetryFrame>) => {
+    setIsLiveBackendConnected(true);
+    setLiveTelemetry(data);
+  }, []);
 
   const activeCurrentState: HarState = (isLiveBackendConnected && liveTelemetry?.current_state) ? liveTelemetry.current_state : currentState;
   const activeExpectedNext: HarState = (isLiveBackendConnected && liveTelemetry?.expected_next) ? liveTelemetry.expected_next : expectedNext;
@@ -1062,5 +949,8 @@ export function useTelemetryStream() {
     handleBootComplete,
     isConnected: true,
     isLiveBackendConnected,
+    ingestRealTelemetry,
+    posePoints: liveTelemetry?.pose_points || [],
+    poseLocked: !!liveTelemetry?.pose_locked,
   };
 }

@@ -66,6 +66,10 @@ export interface TelemetryFrame {
   fps: number;
   confidence_history?: number[];
   cycles_completed?: number;
+  boxes?: BoundingBox[];
+  pose_points?: Array<{ x: number; y: number; v: number }>;
+  hands_points?: Array<Array<{ x: number; y: number }>>;
+  pose_locked?: boolean;
 }
 
 export type LogLevel = "ACCEPTED" | "REJECTED" | "ALERT" | "CONTAINMENT" | "INFO";

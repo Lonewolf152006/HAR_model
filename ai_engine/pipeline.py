@@ -411,6 +411,22 @@ class AstroFlowPipeline:
                     "status": containment.get(b_name, "NOMINAL")
                 })
 
+        # Extract MediaPipe pose & hand landmark coordinates for frontend tracking skeleton
+        pose_points = []
+        if pose_res and pose_res.pose_landmarks:
+            for lm in pose_res.pose_landmarks.landmark:
+                pose_points.append({
+                    "x": round(lm.x * 100, 1),
+                    "y": round(lm.y * 100, 1),
+                    "v": round(lm.visibility, 2)
+                })
+
+        hands_points = []
+        if hands_res and hands_res.multi_hand_landmarks:
+            for hand in hands_res.multi_hand_landmarks:
+                h_lms = [{"x": round(lm.x * 100, 1), "y": round(lm.y * 100, 1)} for lm in hand.landmark]
+                hands_points.append(h_lms)
+
         telemetry = {
             "frame_id": self.frame_counter,
             "timestamp": datetime.now().strftime("%H:%M:%S.%f")[:-3],
@@ -425,6 +441,9 @@ class AstroFlowPipeline:
             "containment": containment,
             "fsm": decision["fsm"],
             "boxes": detected_boxes_list,
+            "pose_points": pose_points,
+            "hands_points": hands_points,
+            "pose_locked": len(pose_points) > 0,
             "is_transition": decision["is_transition"],
             "transition_status": decision["transition_status"],
             "active_alert": decision["active_alert"],

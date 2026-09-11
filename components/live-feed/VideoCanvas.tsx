@@ -5,17 +5,29 @@ import { useTelemetry } from "@/context/TelemetryContext";
 import { AvionicsPanel } from "@/components/ui/AvionicsPanel";
 import { Crosshair, Radio, Target, Activity, ShieldCheck, AlertTriangle, Camera, RefreshCw } from "lucide-react";
 
-interface DetectedBox {
-  id: string;
-  label: string;
-  confidence: number;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  color: string;
-  status?: string;
-}
+// MediaPipe 33-point pose skeletal graph connections
+const POSE_CONNECTIONS: Array<[number, number]> = [
+  // Torso
+  [11, 12],
+  [12, 24],
+  [24, 23],
+  [23, 11],
+  // Left arm
+  [11, 13],
+  [13, 15],
+  // Right arm
+  [12, 14],
+  [14, 16],
+  // Face / Shoulders
+  [0, 11],
+  [0, 12],
+  // Left leg
+  [23, 25],
+  [25, 27],
+  // Right leg
+  [24, 26],
+  [26, 28],
+];
 
 export function VideoCanvas() {
   const {
@@ -26,6 +38,10 @@ export function VideoCanvas() {
     cyclesCompleted,
     activeAlert,
     isReducedMotion,
+    ingestRealTelemetry,
+    posePoints,
+    poseLocked,
+    boundingBoxes,
   } = useTelemetry();
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -36,64 +52,59 @@ export function VideoCanvas() {
   const [isHovered, setIsHovered] = useState(false);
   const [browserDevices, setBrowserDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
-  const [activeCamName, setActiveCamName] = useState<string>("Initializing Camera...");
+  const [activeCamName, setActiveCamName] = useState<string>("Detecting Cameras...");
   const [streamResolution, setStreamResolution] = useState<string>("1280x720");
   const [cameraPermissionGranted, setCameraPermissionGranted] = useState<boolean | null>(null);
-  const [realDetectedBoxes, setRealDetectedBoxes] = useState<DetectedBox[]>([]);
   const [inferenceLatency, setInferenceLatency] = useState<number>(11.4);
   const isInferringRef = useRef<boolean>(false);
 
   // 1. Initialize Browser Camera Stream & Enumerate Devices
-  const startCamera = useCallback(async (deviceId?: string) => {
-    try {
-      const constraints: MediaStreamConstraints = {
-        video: deviceId
-          ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-          : { width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false,
-      };
+  const activateCamera = useCallback((deviceId?: string) => {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices) return;
+    const constraints: MediaStreamConstraints = {
+      video: deviceId
+        ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+        : { width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false,
+    };
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      setCameraPermissionGranted(true);
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(() => {});
-      }
-
-      // Read video tracks and resolution
-      const track = stream.getVideoTracks()[0];
-      if (track) {
-        const settings = track.getSettings();
-        if (settings.width && settings.height) {
-          setStreamResolution(`${settings.width}x${settings.height}`);
+    navigator.mediaDevices.getUserMedia(constraints)
+      .then((stream) => {
+        setCameraPermissionGranted(true);
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(() => {});
         }
-        if (track.label) {
-          setActiveCamName(track.label);
+        const track = stream.getVideoTracks()[0];
+        if (track) {
+          const settings = track.getSettings();
+          if (settings.width && settings.height) {
+            setStreamResolution(`${settings.width}x${settings.height}`);
+          }
+          if (track.label) {
+            setActiveCamName(track.label);
+          }
+          if (settings.deviceId) {
+            setSelectedDeviceId(settings.deviceId);
+          }
         }
-      }
-
-      // Enumerate all video input devices (Camo, OBS, Webcams)
-      const allDevices = await navigator.mediaDevices.enumerateDevices();
-      const videoInputs = allDevices.filter((d) => d.kind === "videoinput");
-      setBrowserDevices(videoInputs);
-
-      if (track && track.getSettings().deviceId) {
-        setSelectedDeviceId(track.getSettings().deviceId || "");
-      }
-    } catch (err) {
-      console.warn("[CAMERA] getUserMedia access failed/denied:", err);
-      setCameraPermissionGranted(false);
-      setActiveCamName("Camera Access Blocked");
-    }
+        return navigator.mediaDevices.enumerateDevices();
+      })
+      .then((devices) => {
+        if (!devices) return;
+        const videoInputs = devices.filter((d) => d.kind === "videoinput");
+        setBrowserDevices(videoInputs);
+      })
+      .catch((err) => {
+        console.warn("[CAMERA] getUserMedia access failed/denied:", err);
+        setCameraPermissionGranted(false);
+        setActiveCamName("Camera Access Blocked");
+      });
   }, []);
 
-  // Request camera on mount (standard Google Meet / Zoom style browser prompt)
   useEffect(() => {
-    if (typeof navigator !== "undefined" && navigator.mediaDevices) {
-      startCamera();
-    }
-  }, [startCamera]);
+    activateCamera();
+  }, [activateCamera]);
 
   // Handle switching camera device
   const handleDeviceChange = (deviceId: string) => {
@@ -102,10 +113,10 @@ export function VideoCanvas() {
     if (matched) {
       setActiveCamName(matched.label || `Camera Device`);
     }
-    startCamera(deviceId);
+    activateCamera(deviceId);
   };
 
-  // 2. Real-Time AI Inference Loop (10Hz Frame Grabber)
+  // 2. Real-Time AI Inference Loop (10Hz Frame Grabber feeding Python backend)
   useEffect(() => {
     const interval = setInterval(async () => {
       if (isInferringRef.current || !videoRef.current || !hiddenCanvasRef.current) return;
@@ -135,16 +146,15 @@ export function VideoCanvas() {
               if (res.ok) {
                 const data = await res.json();
                 if (data.ok && data.telemetry) {
-                  if (Array.isArray(data.telemetry.boxes)) {
-                    setRealDetectedBoxes(data.telemetry.boxes);
-                  }
+                  // Ingest directly into TelemetryContext to update StateConfidenceCard, GateChecklist, etc.
+                  ingestRealTelemetry(data.telemetry);
                   if (data.telemetry.latency_ms) {
                     setInferenceLatency(data.telemetry.latency_ms);
                   }
                 }
               }
             } catch {
-              // Edge hub may be offline, keep local state
+              // Edge hub may be offline
             } finally {
               isInferringRef.current = false;
             }
@@ -158,7 +168,7 @@ export function VideoCanvas() {
     }, 100); // 10Hz inference rate
 
     return () => clearInterval(interval);
-  }, []);
+  }, [ingestRealTelemetry]);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!containerRef.current) return;
@@ -220,7 +230,7 @@ export function VideoCanvas() {
 
         <div className="flex items-center gap-3 text-[10px]">
           <button
-            onClick={() => startCamera(selectedDeviceId)}
+            onClick={() => activateCamera(selectedDeviceId)}
             className="text-[#8A919C] hover:text-[#00E08A] transition-colors flex items-center gap-1"
             title="Refresh Camera Connection"
           >
@@ -263,7 +273,7 @@ export function VideoCanvas() {
               Please click &quot;Allow&quot; on the browser camera permission dialog to stream your Camo Studio phone camera or webcam.
             </div>
             <button
-              onClick={() => startCamera()}
+              onClick={() => activateCamera()}
               className="px-3 py-1.5 bg-[#00E08A]/10 border border-[#00E08A] text-[#00E08A] rounded-[2px] text-xs font-bold hover:bg-[#00E08A]/20 transition-colors"
             >
               REQUEST PERMISSION AGAIN
@@ -271,8 +281,52 @@ export function VideoCanvas() {
           </div>
         )}
 
+        {/* Real MediaPipe Pose Tracking Skeleton (ONLY rendered when person is detected!) */}
+        {posePoints && posePoints.length >= 25 && (
+          <svg
+            className="absolute inset-0 w-full h-full pointer-events-none z-10"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+          >
+            {/* Skeleton Connecting Lines */}
+            {POSE_CONNECTIONS.map(([i, j], idx) => {
+              const p1 = posePoints[i];
+              const p2 = posePoints[j];
+              if (!p1 || !p2 || (p1.v != null && p1.v < 0.35) || (p2.v != null && p2.v < 0.35)) return null;
+              return (
+                <line
+                  key={`bone-${idx}`}
+                  x1={`${p1.x}`}
+                  y1={`${p1.y}`}
+                  x2={`${p2.x}`}
+                  y2={`${p2.y}`}
+                  stroke="#00E08A"
+                  strokeWidth="0.75"
+                  strokeOpacity="0.85"
+                />
+              );
+            })}
+
+            {/* Glowing Joint Nodes */}
+            {posePoints.map((pt, idx) => {
+              if (pt.v != null && pt.v < 0.35) return null;
+              return (
+                <circle
+                  key={`joint-${idx}`}
+                  cx={`${pt.x}`}
+                  cy={`${pt.y}`}
+                  r="0.85"
+                  fill="#4DA3FF"
+                  stroke="#00E08A"
+                  strokeWidth="0.25"
+                />
+              );
+            })}
+          </svg>
+        )}
+
         {/* Real Dynamic AI YOLOv8 Bounding Boxes (ONLY rendered when detected by model!) */}
-        {realDetectedBoxes.map((box) => {
+        {boundingBoxes && boundingBoxes.map((box) => {
           const glowClass =
             box.color === "#FF4D4F"
               ? "glow-critical"
@@ -361,6 +415,14 @@ export function VideoCanvas() {
               {confidence.toFixed(2)}
             </span>
           </div>
+
+          {/* AI Pose Tracking Lock Status Indicator */}
+          <div className="flex items-center gap-1.5 px-2 py-0.5 bg-[#0E1015]/85 border border-white/10 rounded-[2px] font-mono text-[9px] backdrop-blur-sm">
+            <span className={`w-1.5 h-1.5 rounded-full ${poseLocked ? "bg-[#00E08A] animate-pulse" : "bg-[#FFB020]"}`} />
+            <span className={poseLocked ? "text-[#00E08A] font-bold" : "text-[#FFB020]"}>
+              {poseLocked ? "POSE: 33 PTS LOCKED" : "POSE: SEARCHING SUBJECT"}
+            </span>
+          </div>
         </div>
 
         {/* Top-Right Telemetry Badge Strip */}
@@ -394,7 +456,7 @@ export function VideoCanvas() {
           <div className="flex items-center gap-4">
             <span className="flex items-center gap-1.5 text-[#00E08A]">
               <Target className="w-3 h-3" />
-              <span>POSE & OBJECT TRACKING ACTIVE</span>
+              <span>{poseLocked ? "BIOMETRIC TRACKING ACTIVE" : "AWAITING OPERATOR POSTURE"}</span>
             </span>
             <span className="text-[#565C66]">|</span>
             <span>COORDINATES: X:{reticlePos.x}% Y:{reticlePos.y}%</span>
@@ -407,7 +469,7 @@ export function VideoCanvas() {
 
         {/* Critical Alert Warning Bar */}
         {activeAlert?.active && (
-          <div className="absolute top-12 left-3 right-3 bg-[#1A0E10]/95 border-2 border-[#FF4D4F] p-2 rounded-[2px] flex items-center gap-2 font-mono text-xs text-[#FF4D4F] font-bold glow-critical z-30 animate-reject-pulse backdrop-blur-md">
+          <div className="absolute top-16 left-3 right-3 bg-[#1A0E10]/95 border-2 border-[#FF4D4F] p-2 rounded-[2px] flex items-center gap-2 font-mono text-xs text-[#FF4D4F] font-bold glow-critical z-30 animate-reject-pulse backdrop-blur-md">
             <AlertTriangle className="w-4 h-4 shrink-0 animate-ping" />
             <div className="flex-1 truncate">
               PROCEDURAL ALERT: {activeAlert.reason}
