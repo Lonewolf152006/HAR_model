@@ -56,20 +56,31 @@ class VoiceCopilot:
         self.thread.start()
 
     def _worker_loop(self):
+        if sys.platform == "win32":
+            try:
+                import pythoncom
+                pythoncom.CoInitialize()
+            except Exception:
+                pass
+
         engine = None
-        try:
-            import pyttsx3
-            engine = pyttsx3.init()
-            engine.setProperty("rate", 175)
-            engine.setProperty("volume", 1.0)
-            voices = engine.getProperty("voices")
-            # Select clear female/natural voice if available
-            for v in voices:
-                if "zira" in v.name.lower() or "david" in v.name.lower():
-                    engine.setProperty("voice", v.id)
-                    break
-        except Exception as e:
-            print(f"[TTS] pyttsx3 init warning: {e}. Browser Web Speech will handle audio.")
+        def init_engine():
+            try:
+                import pyttsx3
+                e = pyttsx3.init()
+                e.setProperty("rate", 175)
+                e.setProperty("volume", 1.0)
+                voices = e.getProperty("voices")
+                for v in voices:
+                    if "zira" in v.name.lower() or "david" in v.name.lower():
+                        e.setProperty("voice", v.id)
+                        break
+                return e
+            except Exception as ex:
+                print(f"[TTS] pyttsx3 init notice: {ex}")
+                return None
+
+        engine = init_engine()
 
         while self.running:
             try:
@@ -92,8 +103,15 @@ class VoiceCopilot:
                 try:
                     engine.say(text)
                     engine.runAndWait()
-                except Exception as e:
-                    print(f"[TTS] Speech synthesis error: {e}")
+                except Exception:
+                    # Re-initialize engine if COM context reset
+                    try:
+                        engine = init_engine()
+                        if engine:
+                            engine.say(text)
+                            engine.runAndWait()
+                    except Exception:
+                        pass
 
             self.speech_queue.task_done()
             time.sleep(0.1)

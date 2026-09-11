@@ -65,11 +65,13 @@ class PhysicalCausalLogic:
         self.blue_picked = False
         self.blue_placed_in = False
 
-    def can_transition(self, action):
+    def can_transition(self, action, main_box=None, red_box=None, blue_box=None):
         if action == "idle":
             return True, "ok"
 
         if action == "open_box":
+            if main_box is None:
+                return False, "No container detected in camera view"
             if self.box_open:
                 return False, "Container is already open"
             return True, "ok"
@@ -77,6 +79,8 @@ class PhysicalCausalLogic:
         if action == "pick_red":
             if not self.box_open:
                 return False, "Cannot pick red sample: Container lid is closed"
+            if main_box is None:
+                return False, "No container detected in camera view"
             if self.red_placed_out:
                 return False, "Red sample already placed on exterior"
             return True, "ok"
@@ -103,6 +107,8 @@ class PhysicalCausalLogic:
         if action == "close_box":
             if not self.box_open:
                 return False, "Container is already closed"
+            if main_box is None:
+                return False, "No container detected in camera view"
             if not self.red_placed_out:
                 return False, "Cannot close container: Red sample is not secured on exterior"
             if not self.blue_placed_in:
@@ -156,7 +162,7 @@ class DecisionStabilizer:
         idx = (self.state_index + 1) % len(SOP_SEQUENCE)
         return SOP_SEQUENCE[idx]
 
-    def update(self, raw_probs, motion_energy):
+    def update(self, raw_probs, motion_energy, main_box=None, red_box=None, blue_box=None):
         now = time.time()
         best_idx = int(np.argmax(raw_probs))
         candidate = fu.LABELS[best_idx]
@@ -175,8 +181,10 @@ class DecisionStabilizer:
         time_since_trans = now - self.last_transition_time
         gate_cool = time_since_trans >= self.cooldown_sec
         gate_motion = True if candidate == "idle" else motion_energy >= self.motion_floor
-        
-        causal_ok, causal_reason = self.fsm.can_transition(candidate)
+
+        causal_ok, causal_reason = self.fsm.can_transition(
+            candidate, main_box=main_box, red_box=red_box, blue_box=blue_box
+        )
         gate_causal = causal_ok
 
         gates = {
@@ -218,7 +226,7 @@ class DecisionStabilizer:
                 "passed": bool(gate_causal),
                 "value": 1 if gate_causal else 0,
                 "threshold": 1,
-                "reason": causal_reason
+                "reason": causal_reason if not gate_causal else ("Container verified" if main_box is not None else "Awaiting container in scene")
             }
         }
 
@@ -227,10 +235,15 @@ class DecisionStabilizer:
         is_alert = False
         alert_reason = ""
 
-        # Check for sequence violation / step skip
-        if not gate_causal and candidate != "idle" and gate_conf and gate_stab:
-            is_alert = True
-            alert_reason = causal_reason
+        # Procedural alert ONLY triggers on genuine forward sequence skips when container is actually in view!
+        sop_step_names = ["open_box", "pick_red", "place_red_out", "pick_blue", "place_blue_in", "close_box"]
+        if not gate_causal and candidate != "idle" and gate_conf and gate_stab and main_box is not None:
+            if self.expected_next in sop_step_names and candidate in sop_step_names:
+                exp_idx = sop_step_names.index(self.expected_next)
+                cand_idx = sop_step_names.index(candidate)
+                if cand_idx >= exp_idx:
+                    is_alert = True
+                    alert_reason = causal_reason
 
         # Commit accepted state transition
         if all_passed and candidate != self.current_state:
@@ -377,22 +390,39 @@ class AstroFlowPipeline:
 
         inference_ms = (time.time() - t0) * 1000.0
 
-        # 5. 5-Gate Stabilizer & Causal FSM Update
-        decision = self.stabilizer.update(raw_probs, motion_energy)
+        # 5. 5-Gate Stabilizer & Causal FSM Update (passing detected objects)
+        decision = self.stabilizer.update(
+            raw_probs, motion_energy,
+            main_box=boxes.get("main_box"),
+            red_box=boxes.get("red_box"),
+            blue_box=boxes.get("blue_box")
+        )
         self.confidence_history.append(decision["confidence"])
 
         # Voice Feedback Triggering
+        voice_prompt = None
         if decision["is_transition"]:
-            self.voice.announce_step_confirmed(decision["current_state"])
+            step_num = decision["state_index"]
+            desc = SOP_DISPLAY_NAMES.get(decision["current_state"], decision["current_state"])
+            voice_prompt = f"Step {step_num} verified: {desc}."
+            self.voice.speak(voice_prompt, priority=2)
         elif decision["active_alert"]:
-            self.voice.announce_step_missed(decision["expected_next"], decision["current_state"])
+            voice_prompt = f"Procedure alert: {decision['active_alert']['reason']}."
+            self.voice.speak(voice_prompt, priority=0)
 
-        # 6. Geometric Containment Evaluation
-        containment = {
-            "red_box": "INSIDE" if decision["fsm"]["box_open"] and not decision["fsm"]["red_placed_out"] else ("OUTSIDE" if decision["fsm"]["red_placed_out"] else "INSIDE"),
-            "blue_box": "INSIDE" if decision["fsm"]["blue_placed_in"] else "OUTSIDE",
-            "main_box": "OPEN" if decision["fsm"]["box_open"] else "CLOSED",
-        }
+        # 6. Geometric Containment Evaluation (Real physical logic: NOT DETECTED if no container in scene)
+        if boxes.get("main_box") is None:
+            containment = {
+                "main_box": "NOT DETECTED",
+                "red_box": "NOT DETECTED",
+                "blue_box": "NOT DETECTED"
+            }
+        else:
+            containment = {
+                "main_box": "OPEN" if decision["fsm"]["box_open"] else "CLOSED",
+                "red_box": "OUTSIDE" if decision["fsm"]["red_placed_out"] else ("HELD" if decision["fsm"]["red_picked"] else ("INSIDE" if decision["fsm"]["box_open"] else "STANDBY")),
+                "blue_box": "INSIDE" if decision["fsm"]["blue_placed_in"] else ("HELD" if decision["fsm"]["blue_picked"] else "STANDBY"),
+            }
 
         # Real Detected Bounding Boxes from YOLO (ONLY when detected!)
         detected_boxes_list = []
@@ -444,6 +474,7 @@ class AstroFlowPipeline:
             "pose_points": pose_points,
             "hands_points": hands_points,
             "pose_locked": len(pose_points) > 0,
+            "voice_prompt": voice_prompt,
             "is_transition": decision["is_transition"],
             "transition_status": decision["transition_status"],
             "active_alert": decision["active_alert"],

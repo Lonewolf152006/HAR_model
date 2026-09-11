@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useTelemetry } from "@/context/TelemetryContext";
 import { AvionicsPanel } from "@/components/ui/AvionicsPanel";
-import { Crosshair, Radio, Target, Activity, ShieldCheck, AlertTriangle, Camera, RefreshCw } from "lucide-react";
+import { Crosshair, Radio, Target, Activity, ShieldCheck, AlertTriangle, Camera, RefreshCw, Upload } from "lucide-react";
 
 // MediaPipe 33-point pose skeletal graph connections
 const POSE_CONNECTIONS: Array<[number, number]> = [
@@ -38,6 +38,7 @@ export function VideoCanvas() {
     cyclesCompleted,
     activeAlert,
     isReducedMotion,
+    isMuted,
     ingestRealTelemetry,
     posePoints,
     poseLocked,
@@ -47,6 +48,7 @@ export function VideoCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hiddenCanvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [reticlePos, setReticlePos] = useState({ x: 50, y: 50 });
   const [isHovered, setIsHovered] = useState(false);
@@ -56,6 +58,7 @@ export function VideoCanvas() {
   const [streamResolution, setStreamResolution] = useState<string>("1280x720");
   const [cameraPermissionGranted, setCameraPermissionGranted] = useState<boolean | null>(null);
   const [inferenceLatency, setInferenceLatency] = useState<number>(11.4);
+  const [isPlayingVideoFile, setIsPlayingVideoFile] = useState<boolean>(false);
   const isInferringRef = useRef<boolean>(false);
 
   // 1. Initialize Browser Camera Stream & Enumerate Devices
@@ -109,11 +112,37 @@ export function VideoCanvas() {
   // Handle switching camera device
   const handleDeviceChange = (deviceId: string) => {
     setSelectedDeviceId(deviceId);
+    setIsPlayingVideoFile(false);
     const matched = browserDevices.find((d) => d.deviceId === deviceId);
     if (matched) {
       setActiveCamName(matched.label || `Camera Device`);
     }
     activateCamera(deviceId);
+  };
+
+  // Handle recorded video file upload & testing
+  const handleVideoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const url = URL.createObjectURL(file);
+    setIsPlayingVideoFile(true);
+    setActiveCamName(`Test File: ${file.name}`);
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+      videoRef.current.src = url;
+      videoRef.current.loop = true;
+      videoRef.current.play().catch(() => {});
+    }
+  };
+
+  const handleSwitchToCamera = () => {
+    setIsPlayingVideoFile(false);
+    if (videoRef.current) {
+      videoRef.current.src = "";
+    }
+    activateCamera(selectedDeviceId);
   };
 
   // 2. Real-Time AI Inference Loop (10Hz Frame Grabber feeding Python backend)
@@ -151,6 +180,19 @@ export function VideoCanvas() {
                   if (data.telemetry.latency_ms) {
                     setInferenceLatency(data.telemetry.latency_ms);
                   }
+
+                  // Voice Copilot Audio Speech (100% reliable in-browser speech synthesis)
+                  if (data.telemetry.voice_prompt && !isMuted && typeof window !== "undefined" && "speechSynthesis" in window) {
+                    try {
+                      window.speechSynthesis.cancel();
+                      const utterance = new SpeechSynthesisUtterance(data.telemetry.voice_prompt);
+                      utterance.rate = 1.0;
+                      utterance.pitch = 1.0;
+                      window.speechSynthesis.speak(utterance);
+                    } catch {
+                      // Speech synthesis fallback
+                    }
+                  }
                 }
               }
             } catch {
@@ -168,7 +210,7 @@ export function VideoCanvas() {
     }, 100); // 10Hz inference rate
 
     return () => clearInterval(interval);
-  }, [ingestRealTelemetry]);
+  }, [ingestRealTelemetry, isMuted]);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!containerRef.current) return;
@@ -223,8 +265,37 @@ export function VideoCanvas() {
             </select>
           </div>
 
-          <span className="text-[10px] text-[#565C66] hidden md:inline">
-            [{streamResolution} | {activeCamName}]
+          {/* Video File Upload & Playback Test Trigger */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="video/mp4,video/mkv,video/avi,video/webm"
+            className="hidden"
+            onChange={handleVideoFileUpload}
+          />
+
+          {isPlayingVideoFile ? (
+            <button
+              onClick={handleSwitchToCamera}
+              className="flex items-center gap-1 bg-[#00E08A]/15 border border-[#00E08A] px-2 py-0.5 rounded-[2px] font-mono text-[10px] text-[#00E08A] font-bold hover:bg-[#00E08A]/25 transition-colors"
+              title="Return to real-time live camera"
+            >
+              <Camera className="w-3 h-3 text-[#00E08A]" />
+              <span>RETURN TO LIVE CAM</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1 bg-[#171B21] border border-white/20 hover:border-[#00E08A] px-2 py-0.5 rounded-[2px] font-mono text-[10px] text-[#8A919C] hover:text-[#00E08A] font-bold transition-colors"
+              title="Select a recorded video file to run through the AI model"
+            >
+              <Upload className="w-3 h-3" />
+              <span>TEST VIDEO FILE</span>
+            </button>
+          )}
+
+          <span className="text-[10px] text-[#565C66] hidden md:inline truncate max-w-[200px]">
+            [{isPlayingVideoFile ? activeCamName : `${streamResolution} | ${activeCamName}`}]
           </span>
         </div>
 
