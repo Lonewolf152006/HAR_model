@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# reference files (AI agent context only)
+ASTROFLOW AI — UIUX ARCHITECTURE.md
+AstroFlow_AI_specs.pdf
+
+# task tracking
+plan.md
