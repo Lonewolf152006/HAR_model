@@ -160,7 +160,7 @@ export interface NetworkBandwidthState {
   latencyTrend: "up" | "down" | "stable";
 }
 
-export type CameraSourceId = "primary" | "secondary" | "file";
+export type CameraSourceId = "primary" | "secondary" | "file" | string;
 
 export interface CameraSourceConfig {
   id: CameraSourceId;

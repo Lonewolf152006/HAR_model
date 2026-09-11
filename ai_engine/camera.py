@@ -2,10 +2,10 @@
 ai_engine/camera.py - Hardware Camera & Video Input Manager
 
 Features:
-- Enumerate available video devices (DirectShow on Windows, including Camo Studio).
-- Thread-safe camera acquisition with auto-reconnect.
-- Dynamic runtime switching between Camo/Webcams and File/Synthetic fallback.
-- Constant high-throughput frame buffer without frame lag.
+- Enumerate ALL available video capture devices (DirectShow via pygrabber on Windows).
+- Support USB webcams, Camo Studio, OBS Virtual Camera, NVIDIA Broadcast, etc.
+- Dynamic runtime switching between any camera device index or Synthetic Test Loop.
+- Standby warning overlay if a connected camera sends completely blank/black frames.
 """
 
 import os
@@ -15,7 +15,6 @@ import sys
 os.environ["OPENCV_LOG_LEVEL"] = "SILENT"
 
 import time
-import subprocess
 import threading
 import cv2
 import numpy as np
@@ -24,44 +23,47 @@ import numpy as np
 def get_available_cameras():
     """
     Enumerate connected video capture devices on Windows.
-    Queries Windows PnP entities and probes OpenCV DirectShow indices.
+    Uses DirectShow FilterGraph enumeration for friendly names.
     """
     devices = []
     
-    # 1. Query Windows PnP Device Names
-    pnp_names = []
     if sys.platform == "win32":
         try:
-            cmd = "Get-CimInstance Win32_PnPEntity | Where-Object { $_.PNPClass -in @('Camera', 'Image') } | Select-Object -ExpandProperty Name"
-            out = subprocess.check_output(["powershell", "-NoProfile", "-Command", cmd], text=True, timeout=3)
-            pnp_names = [line.strip() for line in out.strip().splitlines() if line.strip()]
-        except Exception:
-            pass
-
-    # 2. Probe OpenCV indices for detected PnP cameras
-    probe_count = max(1, len(pnp_names))
-    for idx in range(probe_count):
-        cap = cv2.VideoCapture(idx)
-        if cap.isOpened():
-            ret, _ = cap.read()
-            cap.release()
-            if ret:
-                name = pnp_names[idx] if idx < len(pnp_names) else f"Camera #{idx}"
-                # If "Camo" exists in PnP, ensure friendly label
-                is_camo = any("camo" in p.lower() for p in pnp_names) and idx == 0
-                label = f"{name} (Camo Studio)" if is_camo else name
+            from pygrabber.dshow_graph import FilterGraph
+            graph = FilterGraph()
+            dev_names = graph.get_input_devices()
+            for idx, name in enumerate(dev_names):
                 devices.append({
                     "id": str(idx),
                     "index": idx,
-                    "name": label,
+                    "name": name,
                     "type": "hardware",
                     "status": "connected",
-                    "resolution": "1280x720"
+                    "resolution": "1280x720" if "camo" in name.lower() else "640x480"
                 })
-        else:
-            cap.release()
+        except Exception:
+            pass
 
-    # If no physical devices opened, add synthetic/test fallback device
+    # Fallback if pygrabber didn't populate
+    if not devices:
+        for idx in range(3):
+            cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY)
+            if cap.isOpened():
+                ret, _ = cap.read()
+                cap.release()
+                if ret:
+                    devices.append({
+                        "id": str(idx),
+                        "index": idx,
+                        "name": f"Video Device #{idx}",
+                        "type": "hardware",
+                        "status": "connected",
+                        "resolution": "640x480"
+                    })
+            else:
+                cap.release()
+
+    # Always include Synthetic / Test Loop fallback
     devices.append({
         "id": "file",
         "index": -1,
@@ -75,7 +77,7 @@ def get_available_cameras():
 
 
 class CameraManager:
-    """Thread-safe background camera frame grabber."""
+    """Thread-safe background camera frame grabber supporting all video devices."""
     def __init__(self, initial_source=0):
         self.source = initial_source
         self.cap = None
@@ -87,8 +89,8 @@ class CameraManager:
         self.thread = None
         self.source_type = "camera"  # "camera" or "file"
         self.file_path = None
-        self.width = 1280
-        self.height = 720
+        self.active_device_name = "Camera #0"
+        self.is_blank_frame = False
 
     def start(self):
         if self.running:
@@ -109,32 +111,49 @@ class CameraManager:
 
             if self.source_type == "file" and self.file_path and os.path.exists(self.file_path):
                 self.cap = cv2.VideoCapture(self.file_path)
+                self.active_device_name = "Synthetic Test Video"
+            elif self.source_type == "file":
+                self.active_device_name = "Synthetic Test Pattern"
+                self.cap = None
             else:
                 idx = int(self.source) if isinstance(self.source, (int, str)) and str(self.source).isdigit() else 0
-                self.cap = cv2.VideoCapture(idx)
+                backend = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
+                self.cap = cv2.VideoCapture(idx, backend)
                 if self.cap.isOpened():
                     self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
                     self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
                     self.cap.set(cv2.CAP_PROP_FPS, 30)
 
+                # Identify name
+                try:
+                    cams = get_available_cameras()
+                    matched = next((c for c in cams if c["id"] == str(idx)), None)
+                    if matched:
+                        self.active_device_name = matched["name"]
+                    else:
+                        self.active_device_name = f"Camera #{idx}"
+                except Exception:
+                    self.active_device_name = f"Camera #{idx}"
+
     def switch_source(self, source_id, file_path=None):
         """Switch video source dynamically."""
-        if source_id == "file" and file_path:
+        print(f"[CAMERA] Switching video source to: {source_id}")
+        if source_id == "file":
             self.source_type = "file"
             self.file_path = file_path
+            self.source = "file"
         else:
             self.source_type = "camera"
             self.source = int(source_id) if str(source_id).isdigit() else 0
         self._open_source()
 
     def _generate_synthetic_frame(self):
-        """Generates clean avionics synthetic test patterns if camera is unavailable."""
+        """Generates clean avionics synthetic test patterns if camera is unavailable or in test mode."""
         img = np.zeros((720, 1280, 3), dtype=np.uint8)
-        # Background gradient
         t = time.time()
-        cv2.putText(img, "ASTROFLOW AI — SYNTHETIC CAMERA LOOP", (60, 120), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 224, 138), 2)
+        cv2.putText(img, "ASTROFLOW AI — SYNTHETIC VIDEO FEED", (60, 120), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 224, 138), 2)
         cv2.putText(img, f"TIMESTAMP: {time.strftime('%Y-%m-%d %H:%M:%S')}.{int((t%1)*1000):03d}", (60, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (138, 145, 156), 2)
-        cv2.putText(img, "SOURCE: Camo Virtual Studio / Standby Test Pattern", (60, 230), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 176, 32), 2)
+        cv2.putText(img, f"ACTIVE SOURCE: {self.active_device_name} (STANDBY TEST PATTERN)", (60, 230), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 176, 32), 2)
         
         # Draw mock experiment box and sample cubes
         box_x, box_y, box_w, box_h = 440, 300, 400, 260
@@ -162,12 +181,29 @@ class CameraManager:
             if self.cap is not None and self.cap.isOpened():
                 ret, raw = self.cap.read()
                 if ret and raw is not None:
+                    # Check if the device is outputting a totally black screen (e.g. Camo app idle / phone locked)
+                    mean_val = float(raw.mean())
+                    if mean_val < 0.5:
+                        self.is_blank_frame = True
+                        # Overlay helpful instruction so user isn't looking at an empty black void
+                        h, w, _ = raw.shape
+                        cv2.rectangle(raw, (w//2 - 360, h//2 - 60), (w//2 + 360, h//2 + 60), (20, 24, 30), -1)
+                        cv2.rectangle(raw, (w//2 - 360, h//2 - 60), (w//2 + 360, h//2 + 60), (255, 176, 32), 2)
+                        cv2.putText(raw, f"[{self.active_device_name.upper()}] NO VIDEO SIGNAL", (w//2 - 330, h//2 - 20),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 176, 32), 2)
+                        cv2.putText(raw, "Check that Camo app on your phone is open & streaming,", (w//2 - 330, h//2 + 10),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (230, 233, 237), 1)
+                        cv2.putText(raw, "or switch to OBS Virtual Camera / Test Mode in Settings.", (w//2 - 330, h//2 + 38),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 224, 138), 1)
+                    else:
+                        self.is_blank_frame = False
                     frame = raw
-                elif self.source_type == "file":
+                elif self.source_type == "file" and self.cap:
                     # Loop video
                     self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             
             if frame is None:
+                self.is_blank_frame = False
                 frame = self._generate_synthetic_frame()
                 time.sleep(0.033)
 
@@ -184,7 +220,7 @@ class CameraManager:
             time.sleep(0.005)
 
     def read(self):
-        """Returns the latest captured frame and timestamp."""
+        """Returns the latest captured frame, timestamp, and device metadata."""
         with self.lock:
             if self.latest_frame is None:
                 return False, self._generate_synthetic_frame(), 0.0, self.fps

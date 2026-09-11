@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useTelemetry } from "@/context/TelemetryContext";
 import { AvionicsPanel } from "@/components/ui/AvionicsPanel";
-import { Crosshair, Radio, Target, Activity, Cpu, ShieldCheck, AlertTriangle } from "lucide-react";
+import { Crosshair, Radio, Target, Activity, Cpu, ShieldCheck, AlertTriangle, Camera } from "lucide-react";
 
 export function VideoCanvas() {
   const {
@@ -20,6 +20,36 @@ export function VideoCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [reticlePos, setReticlePos] = useState({ x: 50, y: 50 });
   const [isHovered, setIsHovered] = useState(false);
+  const [cameraDevices, setCameraDevices] = useState<Array<{ id: string; name: string }>>([
+    { id: "0", name: "Camo Studio" },
+    { id: "1", name: "Camera (NVIDIA Broadcast)" },
+    { id: "2", name: "OBS Virtual Camera" },
+    { id: "file", name: "Synthetic Test Loop" },
+  ]);
+  const [activeCamId, setActiveCamId] = useState<string>("0");
+
+  useEffect(() => {
+    fetch("http://localhost:8080/api/v1/camera/devices")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.devices && Array.isArray(data.devices)) {
+          setCameraDevices(data.devices);
+          if (data.active_source !== undefined) {
+            setActiveCamId(String(data.active_source));
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleQuickCamSwitch = (deviceId: string) => {
+    setActiveCamId(deviceId);
+    fetch("http://localhost:8080/api/v1/camera/select", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device_id: deviceId }),
+    }).catch(() => {});
+  };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!containerRef.current) return;
@@ -44,22 +74,34 @@ export function VideoCanvas() {
       }`}
       bracketColor={activeAlert?.active ? "border-[#FF4D4F]" : "border-[#00E08A]"}
     >
-      {/* Top Header Flight Strip */}
+      {/* Top Header Flight Strip with Quick Camera Selector */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-[#12151A] border-b border-white/10 font-mono text-xs select-none shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-[#00E08A] glow-nominal animate-pulse" />
-          <span className="font-bold text-[#E6E9ED] tracking-wider text-xs">
-            PRIMARY CAMERA FEED 01
-          </span>
-          <span className="text-[10px] text-[#565C66]">
-            [1080p60 | SONY IMX477 MIPI-CSI2]
+        <div className="flex items-center gap-2.5">
+          <span className="w-2 h-2 rounded-full bg-[#00E08A] glow-nominal animate-pulse shrink-0" />
+          <div className="flex items-center gap-1.5 bg-[#0E1015] border border-white/15 px-2 py-0.5 rounded-[2px] bezel-depth-subtle">
+            <Camera className="w-3 h-3 text-[#00E08A] shrink-0" />
+            <select
+              value={activeCamId}
+              onChange={(e) => handleQuickCamSwitch(e.target.value)}
+              className="bg-transparent text-[#00E08A] font-mono text-[10px] font-bold outline-none cursor-pointer pr-1"
+              title="Select active camera input (Camo Studio, OBS Virtual Camera, USB Webcams, or Test Mode)"
+            >
+              {cameraDevices.map((d) => (
+                <option key={d.id} value={d.id} className="bg-[#12151A] text-white">
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <span className="text-[10px] text-[#565C66] hidden md:inline">
+            [30 FPS | DIRECTSHOW UVC]
           </span>
         </div>
 
         <div className="flex items-center gap-3 text-[10px]">
           <span className="text-[#8A919C] flex items-center gap-1">
             <Radio className="w-3 h-3 text-[#00E08A]" />
-            <span>59.8 FPS</span>
+            <span>{frame?.fps ? `${frame.fps.toFixed(1)} FPS` : "30.0 FPS"}</span>
           </span>
           <span className="px-1.5 py-0.5 bg-[#1A0E10] border border-[#FF4D4F]/50 text-[#FF4D4F] font-bold rounded-[2px] flex items-center gap-1.5 bezel-depth-subtle">
             <span className="w-1.5 h-1.5 rounded-full bg-[#FF4D4F] glow-critical animate-ping" />
@@ -76,17 +118,18 @@ export function VideoCanvas() {
         onMouseLeave={() => setIsHovered(false)}
         className="flex-1 min-h-0 relative w-full bg-[#07080B] lens-vignette select-none overflow-hidden cursor-crosshair group flex items-center justify-center"
       >
-        {/* Live Camera Stream from Edge Vision Hub (Camo Studio / Video Feed) */}
+        {/* Live Camera Stream from Edge Vision Hub (Camo Studio, OBS, or Selected Device) */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/video_feed"
+          src="http://localhost:8080/video_feed"
           alt="Live Camera Feed"
           className="absolute inset-0 w-full h-full object-cover z-0"
           onError={({ currentTarget }) => {
-            currentTarget.style.display = "none";
+            // If edge server is completely stopped, fall back to wireframe layout
+            currentTarget.style.opacity = "0";
           }}
           onLoad={({ currentTarget }) => {
-            currentTarget.style.display = "block";
+            currentTarget.style.opacity = "1";
           }}
         />
 
