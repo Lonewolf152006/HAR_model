@@ -43,6 +43,9 @@ next-env.d.ts
 # reference files (AI agent context only)
 ASTROFLOW AI — UIUX ARCHITECTURE.md
 AstroFlow_AI_specs.pdf
+AI_MODEL_PROJECT_ARCHITECTURE.md
 
-# task tracking
+# task tracking & context
 plan.md
+tasks.md
+workflow.md

@@ -12,7 +12,7 @@ export function SystemStatusStrip() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
+    queueMicrotask(() => setMounted(true));
   }, []);
 
   // Update rect on scroll or resize if hovered
