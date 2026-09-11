@@ -41,6 +41,7 @@ yarn-error.log*
 next-env.d.ts
 
 # reference files (AI agent context only)
+docs/
 ASTROFLOW AI — UIUX ARCHITECTURE.md
 AstroFlow_AI_specs.pdf
 AI_MODEL_PROJECT_ARCHITECTURE.md
