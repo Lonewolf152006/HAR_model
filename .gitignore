@@ -40,6 +40,14 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
 # reference files (AI agent context only)
 docs/
 ASTROFLOW AI — UIUX ARCHITECTURE.md
