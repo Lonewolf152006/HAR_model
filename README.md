@@ -2,18 +2,18 @@
 
 ![AstroFlow AI Mission Banner](https://capsule-render.vercel.app/api?type=waving&color=0:0B0D10,40:0E171F,75:0A2518,100:00E08A&height=240&section=header&text=ASTROFLOW%20AI&fontSize=52&fontColor=ffffff&fontAlignY=38&desc=Autonomous%20Avionics%20Computer%20Vision%20%26%20SOP%20Verification%20Platform&descAlignY=60&descSize=16&descAlign=50)
 
-[![System Status](https://img.shields.io/badge/System_Status-NOMINAL-00E08A?style=for-the-badge&logo=spacex&logoColor=white&labelColor=0E1015)](https://github.com/DevInfinix/AstroFlow-AI)
-[![Mission Node](https://img.shields.io/badge/Node-ISS--COLUMBUS--HAR-4DA3FF?style=for-the-badge&logo=nasa&logoColor=white&labelColor=0E1015)](https://github.com/DevInfinix/AstroFlow-AI)
-[![Model Engine](https://img.shields.io/badge/Model-BiLSTM_%2B_Attention_%2B_YOLOv8-FFB020?style=for-the-badge&logo=pytorch&logoColor=white&labelColor=0E1015)](https://github.com/DevInfinix/AstroFlow-AI)
-[![Edge Latency](https://img.shields.io/badge/Inference-11.4ms_FP16_Edge-00E08A?style=for-the-badge&labelColor=0E1015)](https://github.com/DevInfinix/AstroFlow-AI)
-[![Voice Copilot](https://img.shields.io/badge/Voice_Copilot-100%25_Offline_Zero_Cloud-7928CA?style=for-the-badge&labelColor=0E1015)](https://github.com/DevInfinix/AstroFlow-AI)
+[![System Status](https://img.shields.io/badge/System_Status-NOMINAL-00E08A?style=for-the-badge&logo=spacex&logoColor=white&labelColor=0E1015)](https://github.com/Aryasurya12/AstroFlow-AI)
+[![Mission Node](https://img.shields.io/badge/Node-ISS--COLUMBUS--HAR-4DA3FF?style=for-the-badge&logo=nasa&logoColor=white&labelColor=0E1015)](https://github.com/Aryasurya12/AstroFlow-AI)
+[![Model Engine](https://img.shields.io/badge/Model-BiLSTM_%2B_Attention_%2B_YOLOv8-FFB020?style=for-the-badge&logo=pytorch&logoColor=white&labelColor=0E1015)](https://github.com/Aryasurya12/AstroFlow-AI)
+[![Edge Latency](https://img.shields.io/badge/Inference-11.4ms_FP16_Edge-00E08A?style=for-the-badge&labelColor=0E1015)](https://github.com/Aryasurya12/AstroFlow-AI)
+[![Voice Copilot](https://img.shields.io/badge/Voice_Copilot-100%25_Offline_Zero_Cloud-7928CA?style=for-the-badge&labelColor=0E1015)](https://github.com/Aryasurya12/AstroFlow-AI)
 
 [![Next.js](https://img.shields.io/badge/Next.js-16.3.4_Turbopack-000000?style=for-the-badge&logo=nextdotjs&logoColor=white&labelColor=0E1015)](https://nextjs.org/)
 [![Bun](https://img.shields.io/badge/Bun-1.3.9_Runtime-FBF0DF?style=for-the-badge&logo=bun&logoColor=black&labelColor=0E1015)](https://bun.sh/)
 [![Python](https://img.shields.io/badge/Python-3.10.11-3776AB?style=for-the-badge&logo=python&logoColor=white&labelColor=0E1015)](https://python.org/)
-[![Stars](https://img.shields.io/github/stars/DevInfinix/AstroFlow-AI?style=for-the-badge&logo=github&color=00E08A&labelColor=0E1015)](https://github.com/DevInfinix/AstroFlow-AI/stargazers)
-[![Forks](https://img.shields.io/github/forks/DevInfinix/AstroFlow-AI?style=for-the-badge&logo=github&color=4DA3FF&labelColor=0E1015)](https://github.com/DevInfinix/AstroFlow-AI/network/members)
-[![Telemetry Views](https://komarev.com/ghpvc/?username=AstroFlow-AI-DevInfinix&label=Telemetry+Uplinks&color=00e08a&style=for-the-badge)](https://github.com/DevInfinix/AstroFlow-AI)
+[![Stars](https://img.shields.io/github/stars/Aryasurya12/AstroFlow-AI?style=for-the-badge&logo=github&color=00E08A&labelColor=0E1015)](https://github.com/Aryasurya12/AstroFlow-AI/stargazers)
+[![Forks](https://img.shields.io/github/forks/Aryasurya12/AstroFlow-AI?style=for-the-badge&logo=github&color=4DA3FF&labelColor=0E1015)](https://github.com/Aryasurya12/AstroFlow-AI/network/members)
+[![Telemetry Views](https://komarev.com/ghpvc/?username=Aryasurya12-AstroFlow-AI&label=Telemetry+Uplinks&color=00e08a&style=for-the-badge)](https://github.com/Aryasurya12/AstroFlow-AI)
 
 <p align="center">
   <b>Autonomous Real-Time Edge Computer Vision, 5-Gate Decision Stabilization, and Offline Procedural Guidance for Microgravity IVA/EVA Experiment Protocols.</b>
@@ -145,19 +145,6 @@ To prevent false transitions caused by frame flicker, microgravity floating limb
 
 ---
 
-### [>] Repository Velocity & Developer Metrics
-
-<div align="center">
-
-[![DevInfinix GitHub Stats](https://github-readme-stats.vercel.app/api?username=DevInfinix&show_icons=true&theme=tokyonight&hide_border=true&bg_color=0E1015&title_color=00E08A&icon_color=4DA3FF&text_color=E6E9ED)](https://github.com/DevInfinix)
-[![GitHub Streak](https://streak-stats.demolab.com/?user=DevInfinix&theme=tokyonight&hide_border=true&background=0E1015&ring=00E08A&fire=00E08A&currStreakLabel=00E08A)](https://github.com/DevInfinix)
-
-[![Top Languages](https://github-readme-stats.vercel.app/api/top-langs/?username=DevInfinix&layout=compact&theme=tokyonight&hide_border=true&bg_color=0E1015&title_color=00E08A&text_color=E6E9ED)](https://github.com/DevInfinix)
-
-</div>
-
----
-
 ### [>] Prerequisites
 
 Ensure the following runtimes are installed on your host system:
@@ -175,7 +162,7 @@ Ensure the following runtimes are installed on your host system:
 
 #### Step 1: Clone Repository
 ```bash
-git clone https://github.com/DevInfinix/AstroFlow-AI.git
+git clone https://github.com/Aryasurya12/AstroFlow-AI.git
 cd AstroFlow-AI
 git checkout feat/edge-ai-vision-integration
 ```
@@ -331,7 +318,7 @@ AstroFlow-AI/
 
 <p align="center">
   <b>AstroFlow AI — Autonomous Avionics Platform</b><br/>
-  Engineering Lead: <a href="https://github.com/DevInfinix">DevInfinix</a> • Node: ISS-COLUMBUS-HAR
+  Mission Node: ISS-COLUMBUS-HAR | Session: EXP-2026-0924
 </p>
 
 </div>
