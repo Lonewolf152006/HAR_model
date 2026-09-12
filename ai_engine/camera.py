@@ -63,6 +63,16 @@ def get_available_cameras():
             else:
                 cap.release()
 
+    # Include Browser Ingest mode as primary option to prevent Windows DirectShow lock
+    devices.insert(0, {
+        "id": "browser",
+        "index": -2,
+        "name": "Browser Webcam / Video Upload",
+        "type": "browser",
+        "status": "ready",
+        "resolution": "Dynamic"
+    })
+
     # Always include Synthetic / Test Loop fallback
     devices.append({
         "id": "file",
@@ -78,7 +88,7 @@ def get_available_cameras():
 
 class CameraManager:
     """Thread-safe background camera frame grabber supporting all video devices."""
-    def __init__(self, initial_source=0):
+    def __init__(self, initial_source="browser"):
         self.source = initial_source
         self.cap = None
         self.running = False
@@ -87,9 +97,9 @@ class CameraManager:
         self.frame_time = 0.0
         self.fps = 30.0
         self.thread = None
-        self.source_type = "camera"  # "camera" or "file"
+        self.source_type = "browser" if initial_source == "browser" else ("file" if initial_source == "file" else "camera")
         self.file_path = None
-        self.active_device_name = "Camera #0"
+        self.active_device_name = "Browser Ingest" if self.source_type == "browser" else "Camera #0"
         self.is_blank_frame = False
 
     def start(self):
@@ -109,7 +119,10 @@ class CameraManager:
                     pass
                 self.cap = None
 
-            if self.source_type == "file" and self.file_path and os.path.exists(self.file_path):
+            if self.source_type == "browser":
+                self.active_device_name = "Browser Ingest"
+                self.cap = None
+            elif self.source_type == "file" and self.file_path and os.path.exists(self.file_path):
                 self.cap = cv2.VideoCapture(self.file_path)
                 self.active_device_name = "Synthetic Test Video"
             elif self.source_type == "file":
@@ -138,7 +151,11 @@ class CameraManager:
     def switch_source(self, source_id, file_path=None):
         """Switch video source dynamically."""
         print(f"[CAMERA] Switching video source to: {source_id}")
-        if source_id == "file":
+        if source_id in ("browser", "none", "-2"):
+            self.source_type = "browser"
+            self.source = "browser"
+            self.file_path = None
+        elif source_id == "file":
             self.source_type = "file"
             self.file_path = file_path
             self.source = "file"
@@ -177,6 +194,10 @@ class CameraManager:
     def _capture_loop(self):
         last_t = time.time()
         while self.running:
+            if self.source_type == "browser":
+                time.sleep(0.05)
+                continue
+
             frame = None
             if self.cap is not None and self.cap.isOpened():
                 ret, raw = self.cap.read()

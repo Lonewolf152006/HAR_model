@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
   // The proxy is opt-in: set API_PROXY_TARGET to enable it, otherwise the
   // local route handlers under app/api/ serve the requests directly.
   async rewrites() {
-    const target = process.env.API_PROXY_TARGET || "http://localhost:8080";
+    const target = process.env.API_PROXY_TARGET || "http://127.0.0.1:8080";
     return [
       {
         source: "/api/v1/:path*",

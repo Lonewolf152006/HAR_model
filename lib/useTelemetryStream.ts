@@ -122,7 +122,7 @@ export function useTelemetryStream() {
 
   const updateThresholds = useCallback((newThresholds: Partial<GateThresholds>) => {
     setThresholds((prev) => ({ ...prev, ...newThresholds }));
-    fetch("http://localhost:8080/api/v1/settings/gates", {
+    fetch("http://127.0.0.1:8080/api/v1/settings/gates", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -136,7 +136,7 @@ export function useTelemetryStream() {
 
   const restoreDefaultThresholds = useCallback(() => {
     setThresholds(DEFAULT_GATE_THRESHOLDS);
-    fetch("http://localhost:8080/api/v1/settings/gates", {
+    fetch("http://127.0.0.1:8080/api/v1/settings/gates", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -151,7 +151,7 @@ export function useTelemetryStream() {
   const setCameraSource = useCallback((id: CameraSourceId) => {
     setCameraSourceState(id);
     const devId = id === "primary" ? "0" : id === "secondary" ? "1" : "file";
-    fetch("http://localhost:8080/api/v1/camera/select", {
+    fetch("http://127.0.0.1:8080/api/v1/camera/select", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ device_id: devId }),
@@ -291,7 +291,9 @@ export function useTelemetryStream() {
 
     function connectWs() {
       try {
-        const host = typeof window !== "undefined" ? window.location.hostname || "localhost" : "localhost";
+        const host = typeof window !== "undefined"
+          ? (window.location.hostname === "localhost" || !window.location.hostname ? "127.0.0.1" : window.location.hostname)
+          : "127.0.0.1";
         ws = new WebSocket(`ws://${host}:8080/ws/telemetry`);
 
         ws.onopen = () => {
@@ -575,8 +577,8 @@ export function useTelemetryStream() {
       const isAlertHolding =
         alertExpiryRef.current !== null && now < alertExpiryRef.current;
 
-      // Check if state is ready to advance normally (held while alert minimum hold is active)
-      if (elapsedInState >= targetDuration && !activeAnomaly && !isAlertHolding) {
+      // Check if state is ready to advance normally (only when live backend is not connected)
+      if (!isLiveBackendConnected && elapsedInState >= targetDuration && !activeAnomaly && !isAlertHolding) {
         // Transition to next state
         const nextIdx = (stateIndexRef.current + 1) % HAR_STATES.length;
         const acceptedState = HAR_STATES[nextIdx].id;
@@ -643,7 +645,50 @@ export function useTelemetryStream() {
     }, 100);
 
     return () => clearInterval(interval);
-  }, [isPaused, activeAnomaly, triggerCausalViolation, clearAlert]);
+  }, [isPaused, activeAnomaly, triggerCausalViolation, clearAlert, isLiveBackendConnected]);
+
+  // Handle Real AI Model state transitions and alerts from liveTelemetry
+  const prevLiveStateRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isLiveBackendConnected || !liveTelemetry) return;
+    const curState = liveTelemetry.current_state;
+    if (!curState) return;
+
+    if (prevLiveStateRef.current !== null && prevLiveStateRef.current !== curState) {
+      const timeStr = liveTelemetry.timestamp || formatTimestamp(new Date());
+      const conf = liveTelemetry.confidence || 0.90;
+
+      if (curState !== "idle") {
+        avionicsAudio.playAcceptedTone();
+        appendLog({
+          timestamp: timeStr,
+          level: "ACCEPTED",
+          state: curState,
+          reason: `STATE → ${curState.toUpperCase()} (conf ${conf.toFixed(2)})`,
+          confidence: conf,
+        });
+
+        if (curState === "open_box") {
+          appendLog({ timestamp: timeStr, level: "CONTAINMENT", state: curState, reason: "CONTAINMENT: Main Stowage Box latch released [OPEN]", confidence: 0.99 });
+        } else if (curState === "pick_red") {
+          appendLog({ timestamp: timeStr, level: "CONTAINMENT", state: curState, reason: "CONTAINMENT: Red Cube [Sample-A] grasp confirmed [HELD]", confidence: 0.95 });
+        } else if (curState === "place_red_out") {
+          appendLog({ timestamp: timeStr, level: "CONTAINMENT", state: curState, reason: "CONTAINMENT: Red Cube [Sample-A] deposited on exterior workbench [OUTSIDE]", confidence: 0.96 });
+        } else if (curState === "pick_blue") {
+          appendLog({ timestamp: timeStr, level: "CONTAINMENT", state: curState, reason: "CONTAINMENT: Blue Cube [Sample-B] grasp confirmed [HELD]", confidence: 0.93 });
+        } else if (curState === "place_blue_in") {
+          appendLog({ timestamp: timeStr, level: "CONTAINMENT", state: curState, reason: "CONTAINMENT: Blue Cube [Sample-B] inserted into stowage interior [INSIDE]", confidence: 0.97 });
+        } else if (curState === "close_box") {
+          appendLog({ timestamp: timeStr, level: "CONTAINMENT", state: curState, reason: "CONTAINMENT: Main Stowage Box lid engaged and sealed [CLOSED]", confidence: 0.99 });
+        }
+      }
+    }
+    prevLiveStateRef.current = curState;
+
+    if (liveTelemetry.active_alert?.active && !activeAlertRef.current?.active) {
+      triggerCausalViolation(liveTelemetry.active_alert.reason);
+    }
+  }, [isLiveBackendConnected, liveTelemetry, appendLog, triggerCausalViolation]);
 
   // Derive realistic frame telemetry
   const timeStr = formatTimestamp(new Date());

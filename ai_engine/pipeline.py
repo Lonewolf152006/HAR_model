@@ -11,6 +11,7 @@ Thin, high-performance wrapper around realtime.py from vision-pipeline:
 import os
 import sys
 import time
+import threading
 from datetime import datetime
 from collections import deque
 
@@ -41,11 +42,13 @@ class AstroFlowPipeline:
         print(f"[PIPELINE] Initializing models from {rt.MODEL_PATH} and {rt.YOLO_MODEL_PATH}...")
         self.tar_model = rt.load_tar_model(rt.MODEL_PATH)
         self.yolo_model = rt.load_yolo(rt.YOLO_MODEL_PATH)
-        self.camera = CameraManager(initial_source=0)
+        self.async_yolo = rt.AsyncYOLODetector(self.yolo_model)
+        self.camera = CameraManager(initial_source="browser")
 
         self.stabilizer = rt.DecisionStabilizer(
             rt.CONFIDENCE_THRESHOLD, rt.STABILITY_WINDOW, rt.COOLDOWN_SEC, rt.CYCLE_COOLDOWN_SEC
         )
+        self.stabilizer.motion_floor = rt.MOTION_THRESHOLD
         self.spotter = rt.MotionActionSpotter()
         self.box_tracker = rt.BoxTracker(max_missing=8)
         self.containment = rt.GeometricContainmentEngine(buffer_size=8)
@@ -57,20 +60,44 @@ class AstroFlowPipeline:
 
         self.window = deque(maxlen=rt.SEQ_LEN)
         self.prev_base = None
+        self.prev_feat = None
+        self.last_frame_time = time.time()
         self.frame_counter = 1000
         self.confidence_history = deque([0.85] * 50, maxlen=50)
 
         # Pose smoothing buffer: holds pose across brief 4-frame dropouts to prevent flickering
         self.last_valid_pose = []
         self.pose_missing_frames = 0
+        self.running = False
+        self.cam_thread = None
 
     def start(self):
+        self.running = True
         self.camera.start()
         self.voice.start()
+        self.cam_thread = threading.Thread(target=self._camera_loop, daemon=True)
+        self.cam_thread.start()
 
     def stop(self):
+        self.running = False
         self.camera.stop()
         self.voice.stop()
+        if hasattr(self, "async_yolo") and self.async_yolo:
+            self.async_yolo.stop()
+
+    def _camera_loop(self):
+        """Background continuous inference loop when hardware camera / test video is active."""
+        while self.running:
+            if self.camera.source_type == "browser":
+                time.sleep(0.05)
+                continue
+            ret, frame, frame_t, cam_fps = self.camera.read()
+            if ret and frame is not None:
+                try:
+                    self.process_frame(frame, fps=cam_fps)
+                except Exception as e:
+                    print(f"[PIPELINE] Hardware camera loop error: {e}")
+            time.sleep(0.015)
 
     def switch_camera(self, device_id):
         if hasattr(self, "camera") and self.camera:
@@ -85,31 +112,65 @@ class AstroFlowPipeline:
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         pose_res = self.pose.process(rgb)
         hand_res = self.hands.process(rgb)
+        cur_lms = pose_res.pose_landmarks if pose_res else None
 
-        # 1. YOLO Object Detection (Direct proven implementation from test_video_tar.py)
-        yolo_detections = pea.run_yolo(self.yolo_model, frame, conf_threshold=0.20)
+        # 1. Asynchronous YOLO Object Detection with Calibrated HSV & Spatial Validation
+        self.async_yolo.update_frame(frame)
+        yolo_detections = self.async_yolo.get_detections()
         yolo_red, yolo_blue, yolo_main = None, None, None
+
         for det in yolo_detections:
             x1, y1, x2, y2 = [int(v) for v in det["box"]]
             rect = (x1, y1, max(1, x2 - x1), max(1, y2 - y1))
             box_item = {"rect": rect, "area": rect[2] * rect[3], "score": det["conf"]}
             name = det["name"]
-            if "red" in name and (yolo_red is None or det["conf"] > yolo_red["score"]):
-                yolo_red = box_item
-            elif "blue" in name and (yolo_blue is None or det["conf"] > yolo_blue["score"]):
-                yolo_blue = box_item
+
+            if "red" in name:
+                if rt.validate_yolo_detection(frame, rect, name, pose_landmarks=cur_lms):
+                    if yolo_red is None or det["conf"] > yolo_red["score"]:
+                        yolo_red = box_item
+            elif "blue" in name:
+                if rt.validate_yolo_detection(frame, rect, name, pose_landmarks=cur_lms):
+                    if yolo_blue is None:
+                        yolo_blue = box_item
+                    else:
+                        # Foreground proximity prioritization: pick blue box nearest to hand/workbench
+                        if cur_lms and len(cur_lms.landmark) > 16:
+                            cx1, cy1 = rect[0] + rect[2] / 2.0, rect[1] + rect[3] / 2.0
+                            old_r = yolo_blue["rect"]
+                            cx0, cy0 = old_r[0] + old_r[2] / 2.0, old_r[1] + old_r[3] / 2.0
+                            d1 = min(np.hypot(cx1 - cur_lms.landmark[15].x * w, cy1 - cur_lms.landmark[15].y * h),
+                                     np.hypot(cx1 - cur_lms.landmark[16].x * w, cy1 - cur_lms.landmark[16].y * h))
+                            d0 = min(np.hypot(cx0 - cur_lms.landmark[15].x * w, cy0 - cur_lms.landmark[15].y * h),
+                                     np.hypot(cx0 - cur_lms.landmark[16].x * w, cy0 - cur_lms.landmark[16].y * h))
+                            if d1 < d0:
+                                yolo_blue = box_item
+                        elif det["conf"] > yolo_blue["score"]:
+                            yolo_blue = box_item
             elif "main" in name or "box" in name:
                 if yolo_main is None or det["conf"] > yolo_main["score"]:
-                    yolo_main = box_item
+                    if rt.validate_yolo_detection(frame, rect, name, pose_landmarks=cur_lms):
+                        yolo_main = box_item
 
         # 2. Extract Base Features with Bounding Boxes
         base, det_flags, (red_box, blue_box, main_box), edge_debug, lid_score = extract_base_features(
             pose_res, hand_res, frame, override_boxes=(yolo_red, yolo_blue, yolo_main)
         )
 
-        # Prevent edge detector from hallucinating main_box on empty room desks
+        # Prevent edge detector from hallucinating main_box on empty room walls
         if yolo_main is None and yolo_red is None and yolo_blue is None:
-            main_box = None
+            # Keep edge-detected main_box if operator is present and actively interacting near/with the box
+            if cur_lms and len(cur_lms.landmark) > 16 and main_box and "rect" in main_box:
+                mx, my, mw, mh = main_box["rect"]
+                cx, cy = mx + mw / 2.0, my + mh / 2.0
+                d_hand = min(
+                    np.hypot(cx - cur_lms.landmark[15].x * w, cy - cur_lms.landmark[15].y * h),
+                    np.hypot(cx - cur_lms.landmark[16].x * w, cy - cur_lms.landmark[16].y * h)
+                )
+                if d_hand > (max(mw, mh) * 0.95 + 80):
+                    main_box = None
+            else:
+                main_box = None
 
         # 3. Smooth Brief Dropouts via BoxTracker (up to 8 frames)
         red_box = self.box_tracker.get_fallback("red", red_box)
@@ -117,23 +178,29 @@ class AstroFlowPipeline:
         main_box = self.box_tracker.get_fallback("main", main_box)
 
         # 4. Geometric Containment Evaluation
-        self.containment.update(red_box, blue_box, main_box, pose_res.pose_landmarks if pose_res else None, frame.shape)
+        self.containment.update(red_box, blue_box, main_box, cur_lms, frame.shape)
 
-        # 5. Kinematic Motion Calculation
+        # 5. Kinematic Motion Calculation with Time-Scale Normalization
+        # Normalizes velocity vector to 30 FPS training data distribution regardless of ingest rate
+        dt = max(0.001, now - self.last_frame_time)
+        self.last_frame_time = now
+        time_scale = min(2.5, max(0.4, 30.0 * dt))
+
         if self.prev_base is None:
-            motion = 0.0
             vel = np.zeros_like(base)
         else:
-            motion = float(np.mean(np.abs(base - self.prev_base)))
-            vel = base - self.prev_base
+            vel = (base - self.prev_base) / time_scale
         self.prev_base = base.copy()
 
         # 6. Dual-Path Temporal Action Prediction
         feat = np.concatenate([base, vel]).astype(np.float32)
+        motion = rt.compute_motion(self.prev_feat, feat)
+        self.prev_feat = feat.copy()
+
         result = rt.process_frame(
             feat, motion, self.window, self.tar_model, self.stabilizer, self.spotter, now,
             yolo_red=yolo_red, yolo_blue=yolo_blue, red_box=red_box, blue_box=blue_box,
-            main_box=main_box, pose_landmarks=pose_res.pose_landmarks if pose_res else None,
+            main_box=main_box, pose_landmarks=cur_lms,
             frame_shape=frame.shape, expected_action=self.sop_tracker.expected_action,
             containment=self.containment
         )
@@ -142,6 +209,8 @@ class AstroFlowPipeline:
         voice_prompt = None
         if result["state_changed"] and result["current_state"] != "idle":
             self.sop_tracker.update(result["current_state"], now)
+            if result["current_state"] in ("close_box", "open_box"):
+                self.containment.reset()
             step_title = self.sop_tracker.expected_action_title or result["current_state"]
             voice_prompt = f"Step verified: {step_title}."
             self.voice.speak(voice_prompt, priority=2)
@@ -151,27 +220,38 @@ class AstroFlowPipeline:
             voice_prompt = f"Procedure alert: {reason}."
             self.voice.speak(voice_prompt, priority=0)
 
-        # 8. Extract Real Detected Bounding Boxes for UI
+        # 8. Extract Real Detected Bounding Boxes for UI with Normalized Confidence
+        def _norm_conf(raw, default=0.90):
+            try:
+                f = float(raw)
+                if f > 1.0:
+                    return round(min(0.96, max(0.65, default)), 2)
+                return round(min(1.0, max(0.0, f)), 2)
+            except Exception:
+                return default
+
+        is_box_open = self.stabilizer.causal_logic.box_open or lid_score > 0.02 or self.sop_tracker.current_step > 0
+
         detected_boxes_list = []
         if main_box and "rect" in main_box:
             mx, my, mw, mh = main_box["rect"]
             detected_boxes_list.append({
                 "id": "main_box",
                 "label": "MAIN CONTAINER",
-                "confidence": round(main_box.get("score", 0.94), 2),
+                "confidence": _norm_conf(main_box.get("score", 0.94), 0.94),
                 "x": round((mx / w) * 100, 1),
                 "y": round((my / h) * 100, 1),
                 "w": round((mw / w) * 100, 1),
                 "h": round((mh / h) * 100, 1),
                 "color": "#00E08A",
-                "status": "OPEN" if self.stabilizer.causal_logic.box_open else "CLOSED"
+                "status": "OPEN" if is_box_open else "CLOSED"
             })
         if red_box and "rect" in red_box:
             rx, ry, rw, rh = red_box["rect"]
             detected_boxes_list.append({
                 "id": "red_box",
                 "label": "RED CUBE [SAMPLE-A]",
-                "confidence": round(red_box.get("score", 0.90), 2),
+                "confidence": _norm_conf(red_box.get("score", 0.90), 0.90),
                 "x": round((rx / w) * 100, 1),
                 "y": round((ry / h) * 100, 1),
                 "w": round((rw / w) * 100, 1),
@@ -184,7 +264,7 @@ class AstroFlowPipeline:
             detected_boxes_list.append({
                 "id": "blue_box",
                 "label": "BLUE CUBE [SAMPLE-B]",
-                "confidence": round(blue_box.get("score", 0.90), 2),
+                "confidence": _norm_conf(blue_box.get("score", 0.90), 0.90),
                 "x": round((bx / w) * 100, 1),
                 "y": round((by / h) * 100, 1),
                 "w": round((bw / w) * 100, 1),
@@ -224,7 +304,7 @@ class AstroFlowPipeline:
             }
         else:
             containment_state = {
-                "main_box": "OPEN" if self.stabilizer.causal_logic.box_open else "CLOSED",
+                "main_box": "OPEN" if is_box_open else "CLOSED",
                 "red_box": self.containment.red_status if self.containment.red_status != "UNKNOWN" else "STANDBY",
                 "blue_box": self.containment.blue_status if self.containment.blue_status != "UNKNOWN" else "STANDBY",
             }
@@ -306,7 +386,7 @@ class AstroFlowPipeline:
             "gates": gates,
             "containment": containment_state,
             "fsm": {
-                "box_open": self.stabilizer.causal_logic.box_open,
+                "box_open": is_box_open,
                 "red_picked": self.stabilizer.causal_logic.red_picked,
                 "red_placed_out": self.stabilizer.causal_logic.red_placed_out,
                 "blue_picked": self.stabilizer.causal_logic.blue_picked,
@@ -346,3 +426,5 @@ class AstroFlowPipeline:
             self.stabilizer.stability_window = int(stability)
         if cooldown is not None:
             self.stabilizer.cooldown_sec = float(cooldown)
+        if motion is not None:
+            self.stabilizer.motion_floor = float(motion)

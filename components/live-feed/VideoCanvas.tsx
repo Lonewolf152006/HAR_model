@@ -74,7 +74,19 @@ export function VideoCanvas() {
       audio: false,
     };
 
-    navigator.mediaDevices.getUserMedia(constraints)
+    const tryGetUserMedia = async () => {
+      try {
+        return await navigator.mediaDevices.getUserMedia(constraints);
+      } catch {
+        // Fallback: try basic video constraint if 1280x720 or exact deviceId was rejected
+        return await navigator.mediaDevices.getUserMedia({
+          video: deviceId ? { deviceId } : true,
+          audio: false,
+        });
+      }
+    };
+
+    tryGetUserMedia()
       .then((stream) => {
         setCameraPermissionGranted(true);
         if (videoRef.current) {
@@ -113,9 +125,37 @@ export function VideoCanvas() {
   }, [activateCamera]);
 
   // Handle switching camera device
+  // Handle switching camera device
   const handleDeviceChange = (deviceId: string) => {
     setSelectedDeviceId(deviceId);
     setIsPlayingVideoFile(false);
+
+    if (deviceId === "backend-mjpeg") {
+      setActiveCamName("Backend 30 FPS Direct Feed");
+      setStreamResolution("1280x720");
+      setCameraPermissionGranted(true);
+      // Instruct Python backend to acquire hardware camera 0
+      fetch("http://127.0.0.1:8080/api/v1/camera/select", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device_id: "0" }),
+      }).catch(() => {});
+      // Stop browser webcam stream if active to release camera
+      if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach((t) => t.stop());
+        videoRef.current.srcObject = null;
+      }
+      return;
+    }
+
+    // Switching to browser camera: release Python camera if held
+    fetch("http://127.0.0.1:8080/api/v1/camera/select", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device_id: "browser" }),
+    }).catch(() => {});
+
     const matched = browserDevices.find((d) => d.deviceId === deviceId);
     if (matched) {
       setActiveCamName(matched.label || `Camera Device`);
@@ -136,6 +176,7 @@ export function VideoCanvas() {
     prevObjectUrlRef.current = url;
 
     setIsPlayingVideoFile(true);
+    setSelectedDeviceId("video-file");
     setActiveCamName(`Test File: ${file.name}`);
 
     if (videoRef.current) {
@@ -167,9 +208,10 @@ export function VideoCanvas() {
     };
   }, []);
 
-  // 2. Real-Time AI Inference Loop (10Hz Frame Grabber feeding Python backend)
+  // 2. Real-Time AI Inference Loop (High-speed ~25 FPS Frame Grabber feeding Python backend)
   useEffect(() => {
     const interval = setInterval(async () => {
+      if (selectedDeviceId === "backend-mjpeg") return;
       if (isInferringRef.current || !videoRef.current || !hiddenCanvasRef.current) return;
       const video = videoRef.current;
       if (video.readyState < 2 || video.videoWidth === 0) return;
@@ -195,7 +237,7 @@ export function VideoCanvas() {
             try {
               const formData = new FormData();
               formData.append("file", blob, "frame.jpg");
-              const res = await fetch("http://localhost:8080/api/v1/infer", {
+              const res = await fetch("http://127.0.0.1:8080/api/v1/infer", {
                 method: "POST",
                 body: formData,
               });
@@ -246,10 +288,10 @@ export function VideoCanvas() {
       } catch {
         isInferringRef.current = false;
       }
-    }, 100); // 10Hz inference rate
+    }, 40); // 40ms interval (~25 FPS high responsiveness)
 
     return () => clearInterval(interval);
-  }, [ingestRealTelemetry, isMuted]);
+  }, [ingestRealTelemetry, isMuted, selectedDeviceId]);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!containerRef.current) return;
@@ -289,14 +331,17 @@ export function VideoCanvas() {
               value={selectedDeviceId}
               onChange={(e) => handleDeviceChange(e.target.value)}
               className="bg-transparent text-[#00E08A] font-mono text-[10px] font-bold outline-none cursor-pointer pr-1"
-              title="Select camera (Camo Studio, OBS Virtual Camera, Webcams)"
+              title="Select camera (Direct Python Stream, Camo Studio, OBS Virtual Camera, Webcams)"
             >
+              <option value="backend-mjpeg" className="bg-[#12151A] text-[#00E08A] font-bold">
+                Direct Python 30 FPS Stream (/video_feed)
+              </option>
               {browserDevices.map((d, i) => (
                 <option key={d.deviceId || i} value={d.deviceId} className="bg-[#12151A] text-white">
                   {d.label || `Camera #${i + 1}`}
                 </option>
               ))}
-              {browserDevices.length === 0 && (
+              {browserDevices.length === 0 && selectedDeviceId !== "backend-mjpeg" && (
                 <option value="" className="bg-[#12151A] text-white">
                   {activeCamName}
                 </option>
@@ -365,22 +410,31 @@ export function VideoCanvas() {
         onMouseLeave={() => setIsHovered(false)}
         className="flex-1 min-h-0 relative w-full bg-[#07080B] lens-vignette select-none overflow-hidden cursor-crosshair group flex items-center justify-center"
       >
-        {/* Real Live Hardware Video Element (Zero-Latency Local Feed) */}
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className="absolute inset-0 w-full h-full object-contain z-0"
-        />
+        {/* Real Live Hardware Video Element or Backend Direct Stream */}
+        {selectedDeviceId === "backend-mjpeg" ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src="http://127.0.0.1:8080/video_feed"
+            alt="Backend 30 FPS Live Video Feed"
+            className="absolute inset-0 w-full h-full object-contain z-0"
+          />
+        ) : (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="absolute inset-0 w-full h-full object-contain z-0"
+          />
+        )}
 
-        {/* Camera Permission Needed State */}
-        {cameraPermissionGranted === false && (
+        {/* Camera Permission Needed State (Only when browser camera is selected) */}
+        {selectedDeviceId !== "backend-mjpeg" && cameraPermissionGranted === false && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#07080B]/90 p-6 text-center font-mono">
             <Camera className="w-12 h-12 text-[#FFB020] mb-3 animate-pulse" />
             <div className="text-sm font-bold text-[#E6E9ED] mb-1">CAMERA PERMISSION REQUIRED</div>
             <div className="text-xs text-[#8A919C] max-w-md mb-4">
-              Please click &quot;Allow&quot; on the browser camera permission dialog to stream your Camo Studio phone camera or webcam.
+              Please click &quot;Allow&quot; on the browser camera permission dialog to stream your Camo Studio phone camera or webcam, or select &quot;Direct Python 30 FPS Stream&quot; above.
             </div>
             <button
               onClick={() => activateCamera()}
@@ -481,7 +535,9 @@ export function VideoCanvas() {
                   style={{ backgroundColor: box.color }}
                 >
                   <span>{box.label}</span>
-                  <span className="opacity-90">{Math.round(box.confidence * 100)}%</span>
+                  <span className="opacity-90">
+                    {Math.min(100, Math.max(0, Math.round((box.confidence <= 1.0 ? box.confidence : box.confidence / 100) * 100)))}%
+                  </span>
                   {box.status && (
                     <span className="bg-black/40 px-1 py-0.2 text-[8px] rounded-[1px]">
                       {box.status}

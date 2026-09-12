@@ -28,7 +28,7 @@ export function CameraSourcePanel() {
 
   const fetchDevices = () => {
     setIsLoading(true);
-    fetch("http://localhost:8080/api/v1/camera/devices")
+    fetch("http://127.0.0.1:8080/api/v1/camera/devices")
       .then((res) => res.json())
       .then((data) => {
         if (data.devices && Array.isArray(data.devices)) {
@@ -46,7 +46,7 @@ export function CameraSourcePanel() {
 
   useEffect(() => {
     let active = true;
-    fetch("http://localhost:8080/api/v1/camera/devices")
+    fetch("http://127.0.0.1:8080/api/v1/camera/devices")
       .then((res) => res.json())
       .then((data) => {
         if (!active) return;
@@ -66,7 +66,7 @@ export function CameraSourcePanel() {
   const handleSelect = (dev: DeviceItem) => {
     setSelectedId(dev.id);
     setCameraSource(dev.id as CameraSourceId);
-    fetch("http://localhost:8080/api/v1/camera/select", {
+    fetch("http://127.0.0.1:8080/api/v1/camera/select", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ device_id: dev.id }),

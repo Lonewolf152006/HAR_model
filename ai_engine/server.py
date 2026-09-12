@@ -92,12 +92,13 @@ async def websocket_telemetry(websocket: WebSocket):
     await websocket.accept()
     last_frame_id = -1
 
+    loop = asyncio.get_running_loop()
+    voice_queue = asyncio.Queue()
+
     # Attach speech listener to forward speech events to browser Web Speech
     def on_voice(text):
         try:
-            asyncio.create_task(
-                websocket.send_text(json.dumps({"msg_type": "VOICE_PROMPT", "text": text}))
-            )
+            loop.call_soon_threadsafe(voice_queue.put_nowait, text)
         except Exception:
             pass
 
@@ -106,6 +107,11 @@ async def websocket_telemetry(websocket: WebSocket):
 
     try:
         while True:
+            # Drain any queued voice prompts
+            while not voice_queue.empty():
+                v_text = voice_queue.get_nowait()
+                await websocket.send_text(json.dumps({"msg_type": "VOICE_PROMPT", "text": v_text}))
+
             telemetry = pipeline.get_latest_telemetry()
             if telemetry and telemetry["frame_id"] != last_frame_id:
                 last_frame_id = telemetry["frame_id"]
@@ -129,7 +135,7 @@ async def websocket_telemetry(websocket: WebSocket):
                     "msg_type": "TELEMETRY",
                     "data": telemetry
                 }))
-            await asyncio.sleep(0.08)  # ~10Hz
+            await asyncio.sleep(0.04)  # ~25Hz telemetry stream
     except WebSocketDisconnect:
         pass
     except Exception as e:

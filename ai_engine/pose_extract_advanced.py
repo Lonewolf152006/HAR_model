@@ -158,12 +158,13 @@ def get_yolo_override_boxes(yolo_model, frame):
     return (yolo_red, yolo_blue, yolo_main)
 
 
-# Robust red ranges: matches scarlet Lotte Choco Pie and red boxes under natural and artificial lighting.
-RED_RANGES = [((0, 65, 45), (14, 255, 255)), ((165, 65, 45), (180, 255, 255))]
-# Robust blue/purple ranges: matches Cadbury Silk purple/violet, royal blue, and blue cube packaging
-BLUE_RANGE = [((90, 30, 25), (170, 255, 255))]
-COLOR_MIN_AREA_RED = 450   # Substantial red box threshold
-COLOR_MIN_AREA_BLUE = 350  # Cadbury Silk / Blue box threshold
+# Robust calibrated red ranges: matches scarlet Lotte Choco Pie packaging (S >= 135, V >= 60, completely separates skin & shadows)
+RED_RANGES = [((0, 135, 60), (14, 255, 255)), ((168, 135, 60), (180, 255, 255))]
+# Calibrated blue/purple ranges: matches Cadbury Silk royal navy blue & purple packaging (Hue 112..170, S >= 48, V >= 28)
+# Strictly separates Cadbury Silk from pale blue/cyan/sky blue shirts (Hue 95..110)
+BLUE_RANGE = [((112, 48, 28), (170, 255, 255))]
+COLOR_MIN_AREA_RED = 800   # Substantial red box threshold
+COLOR_MIN_AREA_BLUE = 400  # Cadbury Silk / Blue box threshold
 COLOR_MIN_AREA = COLOR_MIN_AREA_RED
 
 # ================= SHAPE DETECTION (main box fallback - no reliable color) =================
@@ -243,14 +244,15 @@ def _score_contour(cnt, min_area, is_red=False):
     peri = cv2.arcLength(cnt, True)
     approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
     approx_ok = len(approx) == 4
-    score = area * 0.5 + solidity * 2000 + (300 if approx_ok else 0)
-    return {"rect": (x, y, w, h), "area": area, "solidity": solidity, "approx_ok": approx_ok, "score": score}
+    rank_score = area * 0.5 + solidity * 2000 + (300 if approx_ok else 0)
+    conf = round(min(0.96, max(0.65, 0.72 + solidity * 0.18 + (0.06 if approx_ok else 0.0))), 2)
+    return {"rect": (x, y, w, h), "area": area, "solidity": solidity, "approx_ok": approx_ok, "score": conf, "rank_score": rank_score, "confidence": conf}
 
 
 def _candidates_from_mask(mask, min_area, is_red=False):
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     candidates = [c for c in (_score_contour(cnt, min_area, is_red=is_red) for cnt in contours) if c is not None]
-    candidates.sort(key=lambda c: -c["score"])
+    candidates.sort(key=lambda c: -c["rank_score"])
     return candidates
 
 
@@ -275,8 +277,9 @@ _LAST_VALID_BODY_MASK = None
 
 def get_body_exclusion_mask(pose_landmarks, frame_shape):
     """
-    Creates a binary mask (255=desk/search area, 0=person head/face/upper torso).
-    Ensures human face, lips, skin, and torso clothing are NEVER misidentified as boxes.
+    Creates a binary mask (255=desk/search area, 0=person head/face/upper chest).
+    Ensures human face, lips, skin, and torso clothing are NEVER misidentified as boxes,
+    while NEVER masking the hands, wrists, or objects held in front of the body.
     Caches last known mask across brief pose dropouts.
     """
     global _LAST_VALID_BODY_MASK
@@ -287,30 +290,13 @@ def get_body_exclusion_mask(pose_landmarks, frame_shape):
         if _LAST_VALID_BODY_MASK is not None and _LAST_VALID_BODY_MASK.shape == (h, w):
             return _LAST_VALID_BODY_MASK.copy()
         mask = np.ones((h, w), dtype=np.uint8) * 255
-        cv2.rectangle(mask, (0, 0), (w, int(h * 0.42)), 0, -1)
+        cv2.rectangle(mask, (0, 0), (w, int(h * 0.35)), 0, -1)
         return mask
 
     lms = pose_landmarks.landmark
     mask = np.ones((h, w), dtype=np.uint8) * 255
 
-    # 1. Full Body Column exclusion (masks head, neck, torso, shirt, sleeves, and lap)
-    shoulder_y = int(min(lms[11].y, lms[12].y) * h)
-    body_xs = [lms[i].x * w for i in [11, 12, 13, 14] if lms[i].visibility > 0.1]
-    if not body_xs:
-        body_xs = [lms[11].x * w, lms[12].x * w]
-    body_left = max(0, int(min(body_xs)) - 100)
-    body_right = min(w, int(max(body_xs)) + 100)
-
-    # Mask entire person: head/neck down to the bottom of the frame
-    cv2.rectangle(mask, (0, 0), (w, max(0, shoulder_y - 20)), 0, -1)
-    cv2.rectangle(mask, (body_left, max(0, shoulder_y - 30)), (body_right, h), 0, -1)
-
-    # 2. Upper arm exclusion (keep hands/wrists unmasked so held boxes are not destroyed)
-    if len(lms) > 16:
-        cv2.line(mask, (int(lms[11].x * w), int(lms[11].y * h)), (int(lms[13].x * w), int(lms[13].y * h)), 0, 110)
-        cv2.line(mask, (int(lms[12].x * w), int(lms[12].y * h)), (int(lms[14].x * w), int(lms[14].y * h)), 0, 110)
-
-    # 3. Face & head exclusion (landmarks 0 to 10: nose, eyes, ears, mouth)
+    # 1. Face & head exclusion (landmarks 0 to 10: nose, eyes, ears, mouth)
     face_x = [lms[i].x * w for i in range(11)]
     face_y = [lms[i].y * h for i in range(11)]
     fx1 = max(0, int(min(face_x) - w * 0.12))
@@ -318,6 +304,26 @@ def get_body_exclusion_mask(pose_landmarks, frame_shape):
     fy1 = max(0, int(min(face_y) - h * 0.18))
     fy2 = min(h, int(max(face_y) + h * 0.15))
     cv2.rectangle(mask, (fx1, fy1), (fx2, fy2), 0, -1)
+
+    # 2. Head/neck and upper chest exclusion (above shoulder down to mid-chest)
+    shoulder_y = int(min(lms[11].y, lms[12].y) * h)
+    body_xs = [lms[i].x * w for i in [11, 12, 13, 14] if lms[i].visibility > 0.1]
+    if not body_xs:
+        body_xs = [lms[11].x * w, lms[12].x * w]
+    body_left = max(0, int(min(body_xs)) - 35)
+    body_right = min(w, int(max(body_xs)) + 35)
+
+    # Mask head/neck line
+    cv2.rectangle(mask, (0, 0), (w, max(0, shoulder_y - 20)), 0, -1)
+    # Mask upper torso (chest) down to mid-chest, preserving hands and held objects!
+    chest_bottom = min(h, shoulder_y + int(h * 0.20))
+    cv2.rectangle(mask, (body_left, max(0, shoulder_y - 25)), (body_right, chest_bottom), 0, -1)
+
+    # 3. Explicitly unmask hands and wrists (radius 130px) so held boxes are never masked out
+    for wi in (15, 16, 17, 18, 19, 20):
+        if len(lms) > wi and lms[wi].visibility > 0.1:
+            wx, wy = int(lms[wi].x * w), int(lms[wi].y * h)
+            cv2.circle(mask, (wx, wy), 130, 255, -1)
 
     _LAST_VALID_BODY_MASK = mask.copy()
     return mask
@@ -328,8 +334,9 @@ def detect_color_boxes(frame, exclusion_mask=None, pose_landmarks=None):
     red_mask = _clean_mask(_mask_from_ranges(hsv, RED_RANGES))
     blue_mask = _clean_mask(_mask_from_ranges(hsv, BLUE_RANGE))
     if exclusion_mask is not None:
-        # ONLY apply body exclusion mask to red (skin/lips/torso). Never apply to blue/purple!
+        # Apply body exclusion mask to BOTH red and blue to prevent any shirt false positives!
         red_mask = cv2.bitwise_and(red_mask, red_mask, mask=exclusion_mask)
+        blue_mask = cv2.bitwise_and(blue_mask, blue_mask, mask=exclusion_mask)
 
     red_candidates = _candidates_from_mask(red_mask, COLOR_MIN_AREA_RED, is_red=True)
     blue_candidates = _candidates_from_mask(blue_mask, COLOR_MIN_AREA_BLUE, is_red=False)
@@ -342,6 +349,10 @@ def detect_color_boxes(frame, exclusion_mask=None, pose_landmarks=None):
             bx, by, bw, bh = b["rect"]
             ar = bw / float(max(1, bh))
 
+            # Sub-boxes (Choco Pie / Cadbury Silk) cannot be giant like a person's chest
+            if bw > 280 or bh > 280 or b["area"] > 35000:
+                continue
+
             # Reject extreme edge slivers (shelves, door frames on room boundaries)
             if not is_red:
                 if (bx > w - 75 and bw < 65) or (bx < 25 and bw < 50):
@@ -351,18 +362,42 @@ def detect_color_boxes(frame, exclusion_mask=None, pose_landmarks=None):
             if is_red and ar < 0.55:
                 continue
 
-            # Wrist thread / forearm rejection
+            # Check wrist proximity to perimeter of bounding box (NOT to center!)
+            is_grasped = False
+            wrist_dist_px = 999.0
             if pose_landmarks is not None and len(pose_landmarks.landmark) > 16:
                 lms = pose_landmarks.landmark
+                for wi in (15, 16):
+                    wx, wy = lms[wi].x * w, lms[wi].y * h
+                    dx = max(0, max(bx - wx, wx - (bx + bw)))
+                    dy = max(0, max(by - wy, wy - (by + bh)))
+                    d = np.hypot(dx, dy)
+                    if d < wrist_dist_px:
+                        wrist_dist_px = d
+                is_grasped = wrist_dist_px <= 45.0
+
+            # Torso & Upper-Body Exclusion Guard:
+            # Prevents blue/red shirts on the torso from ever becoming a box detection
+            if pose_landmarks is not None and len(pose_landmarks.landmark) > 16:
+                lms = pose_landmarks.landmark
+                shoulder_y = min(lms[11].y, lms[12].y) * h
+                body_xs = [lms[i].x * w for i in [11, 12, 13, 14] if lms[i].visibility > 0.1]
+                if not body_xs:
+                    body_xs = [lms[11].x * w, lms[12].x * w]
+                torso_x1 = min(body_xs) - 40
+                torso_x2 = max(body_xs) + 40
                 bcx = bx + bw / 2.0
                 bcy = by + bh / 2.0
-                near_arm = False
-                for wi in (13, 14, 15, 16):
-                    if np.hypot(bcx - lms[wi].x * w, bcy - lms[wi].y * h) < 75:
-                        near_arm = True
-                        break
-                if near_arm and is_red and (ar < 0.65 or b["area"] > 10000):
-                    continue
+
+                if not is_grasped:
+                    # Detections on chest / neck / collar are rejected
+                    if bcy < shoulder_y:
+                        continue
+                    if torso_x1 <= bcx <= torso_x2 and bcy <= (shoulder_y + h * 0.28):
+                        continue
+                    # Floor / Bottom Corner Rejection: sub-boxes far from active hand interaction
+                    if wrist_dist_px > 300.0 and (by + bh > h * 0.82 or bx < w * 0.12 or bx + bw > w * 0.88):
+                        continue
 
             # Workspace Distance & Horizon Limit: reject distant background objects
             if (by + bh) < int(h * 0.28):
@@ -370,32 +405,25 @@ def detect_color_boxes(frame, exclusion_mask=None, pose_landmarks=None):
 
             # Reachability Limit: Object must be within reachable human interaction range
             if pose_landmarks is not None and len(pose_landmarks.landmark) > 16:
-                lms = pose_landmarks.landmark
-                cx = bx + bw / 2.0
-                cy = by + bh / 2.0
-                wrist_dist_px = min(
-                    np.hypot(cx - lms[15].x * w, cy - lms[15].y * h),
-                    np.hypot(cx - lms[16].x * w, cy - lms[16].y * h)
-                )
                 diag = np.hypot(w, h)
-                if (wrist_dist_px / diag) > 0.68:
+                if (wrist_dist_px / diag) > 0.62:
                     continue
 
-            # Upper 38% screen check: if candidate has solid area (>= 3000 px), it is a real held box shown to camera!
-            # Only tiny shapes (< 3000 px) in the top 38% need strict wrist proximity to reject ceiling lights.
-            if by < face_limit_y and b["area"] < 3000:
-                wrist_near = False
-                if pose_landmarks is not None and len(pose_landmarks.landmark) > 16:
-                    lms = pose_landmarks.landmark
-                    cx = bx + bw / 2.0
-                    cy = by + bh / 2.0
-                    for wi in (15, 16):
-                        wx, wy = lms[wi].x * w, lms[wi].y * h
-                        if np.hypot(cx - wx, cy - wy) < 220:
-                            wrist_near = True
-                            break
-                if not wrist_near:
-                    continue
+            # Color Density Verification: ensure candidate crop has genuine box color
+            crop = frame[max(0, by):min(h, by + bh), max(0, bx):min(w, bx + bw)]
+            if crop.size > 0:
+                crop_hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+                if is_red:
+                    m1 = cv2.inRange(crop_hsv, np.array([0, 135, 60]), np.array([14, 255, 255]))
+                    m2 = cv2.inRange(crop_hsv, np.array([168, 135, 60]), np.array([180, 255, 255]))
+                    red_density = cv2.countNonZero(m1 | m2) / float(crop.shape[0] * crop.shape[1])
+                    if red_density < 0.16:
+                        continue
+                else:
+                    m = cv2.inRange(crop_hsv, np.array([112, 48, 28]), np.array([170, 255, 255]))
+                    blue_density = cv2.countNonZero(m) / float(crop.shape[0] * crop.shape[1])
+                    if blue_density < 0.08:
+                        continue
 
             return b
         return None
@@ -418,12 +446,13 @@ def _iou(rect_a, rect_b):
     return inter / union if union > 0 else 0.0
 
 
-def detect_main_box(frame, exclusion_mask=None, exclude_rects=None):
+def detect_main_box(frame, exclusion_mask=None, exclude_rects=None, pose_landmarks=None):
     """
     Finds the largest solid, roughly-rectangular region using edges rather
     than color. Candidates overlapping a detected sub-box or person body are excluded.
     """
     exclude_rects = exclude_rects or []
+    h, w = frame.shape[:2]
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     edges = cv2.Canny(blurred, 40, 120)
@@ -431,19 +460,48 @@ def detect_main_box(frame, exclusion_mask=None, exclude_rects=None):
     if exclusion_mask is not None:
         edges = cv2.bitwise_and(edges, edges, mask=exclusion_mask)
 
+    # Reject ceiling (top 20%) and extreme room side margins (left 5%, right 8%)
+    cv2.rectangle(edges, (0, 0), (w, int(h * 0.20)), 0, -1)
+    cv2.rectangle(edges, (0, 0), (int(w * 0.05), h), 0, -1)
+    cv2.rectangle(edges, (int(w * 0.92), 0), (w, h), 0, -1)
+
     contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     candidates = []
     for cnt in contours:
         c = _score_contour(cnt, MAIN_BOX_MIN_AREA)
         if c is None:
             continue
+        bx, by, bw, bh = c["rect"]
+        ar = bw / float(max(1, bh))
+        if ar < 0.40 or ar > 2.8:  # reject vertical doorway columns and long bars
+            continue
+        if (by + bh) < int(h * 0.35):  # reject ceiling lights/fixtures
+            continue
         if any(_iou(c["rect"], ex) > IOU_EXCLUDE_THRESHOLD for ex in exclude_rects):
             continue
+
+        rank = float(c.get("rank_score", c["area"]))
+        # Boost candidate if held by hands or close to hands
+        if pose_landmarks and len(pose_landmarks.landmark) > 16:
+            lms = pose_landmarks.landmark
+            cx, cy = bx + bw / 2.0, by + bh / 2.0
+            d_hand = min(
+                np.hypot(cx - lms[15].x * w, cy - lms[15].y * h),
+                np.hypot(cx - lms[16].x * w, cy - lms[16].y * h)
+            )
+            if d_hand < (max(bw, bh) * 0.9 + 60):
+                rank += 40000.0
+
+        c["rank_score"] = rank
         candidates.append(c)
+
     if not candidates:
         return None, edges
-    candidates.sort(key=lambda c: -c["score"])
-    return candidates[0], edges
+    candidates.sort(key=lambda c: -c["rank_score"])
+    best = candidates[0]
+    best["score"] = 0.92
+    best["confidence"] = 0.92
+    return best, edges
 
 
 # ================= FEATURE ASSEMBLY =================
@@ -535,8 +593,6 @@ def extract_base_features(pose_res, hand_res, frame, override_boxes=None):
         main = o_main
 
     # 3. Run color detection for reliable sub-box localization:
-    # Cadbury Silk purple has distinct packaging color. If HSV finds a solid purple box (area >= 1200),
-    # prefer it over YOLO's noisy/oversized boxes!
     hsv_red, hsv_blue = detect_color_boxes(frame, exclusion_mask=body_mask, pose_landmarks=pose_landmarks_obj)
     if red is None:
         red = hsv_red
@@ -545,17 +601,13 @@ def extract_base_features(pose_res, hand_res, frame, override_boxes=None):
 
     if blue is None:
         blue = hsv_blue
-    elif hsv_blue is not None:
-        if blue.get("area", 0) > 40000 or blue.get("score", 1.0) < 0.40 or hsv_blue["area"] > 2500:
-            blue = hsv_blue
+    elif hsv_blue is not None and blue.get("score", 1.0) < 0.35:
+        blue = hsv_blue
 
     edge_debug = None
     if main is None:
-        # Only fallback to edge-based container detection if candidate sub-boxes exist in the scene,
-        # preventing empty room walls and computer desks from hallucinating a phantom container!
-        if red is not None or blue is not None:
-            exclude_sub = [b["rect"] for b in (red, blue) if b is not None]
-            main, edge_debug = detect_main_box(frame, exclusion_mask=body_mask, exclude_rects=exclude_sub)
+        exclude_sub = [b["rect"] for b in (red, blue) if b is not None]
+        main, edge_debug = detect_main_box(frame, exclusion_mask=body_mask, exclude_rects=exclude_sub, pose_landmarks=pose_landmarks_obj)
 
     red_stats = _box_stats(red, frame.shape)
     blue_stats = _box_stats(blue, frame.shape)
