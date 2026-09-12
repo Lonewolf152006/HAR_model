@@ -467,6 +467,8 @@ class PhysicalCausalLogic:
             # Cycle complete -> reset for next box
             self.reset()
 
+    apply = apply_transition
+
     def get_status_summary(self, dominant_color="NONE"):
         box_str = "OPEN" if self.box_open else "CLOSED"
         if self.red_picked:

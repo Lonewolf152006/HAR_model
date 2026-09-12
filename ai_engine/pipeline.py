@@ -29,6 +29,10 @@ from pose_extract_advanced import extract_base_features, BASE_DIM
 import pose_extract_advanced as pea
 from ai_engine.tts import VoiceCopilot
 
+# Re-export core FSM classes for backward compatibility
+PhysicalCausalLogic = rt.PhysicalCausalLogic
+DecisionStabilizer = rt.DecisionStabilizer
+
 
 class AstroFlowPipeline:
     """Production Inference Pipeline wrapping realtime.py."""
