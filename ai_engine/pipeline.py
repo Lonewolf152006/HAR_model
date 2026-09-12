@@ -230,7 +230,9 @@ class AstroFlowPipeline:
             except Exception:
                 return default
 
-        is_box_open = self.stabilizer.causal_logic.box_open or lid_score > 0.02 or self.sop_tracker.current_step > 0
+        is_box_open = self.stabilizer.causal_logic.box_open or (0 < self.sop_tracker.current_step < len(rt.SOP_STEPS))
+        if result.get("current_state") == "close_box" or self.sop_tracker.is_cycle_completed:
+            is_box_open = False
 
         detected_boxes_list = []
         if main_box and "rect" in main_box:

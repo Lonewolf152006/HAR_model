@@ -35,13 +35,13 @@ function formatTimestamp(date: Date): string {
 }
 
 const STATE_DURATIONS: Record<HarState, number> = {
-  idle: 4500,
-  open_box: 5000,
+  idle: 3500,        // 3.5s movement from idle -> open_box
+  open_box: 4500,
   pick_red: 4500,
-  place_red_out: 5200,
-  pick_blue: 4800,
-  place_blue_in: 5000,
-  close_box: 4600,
+  place_red_out: 4800,
+  pick_blue: 4500,
+  place_blue_in: 3500, // 3.5s after blue in -> close_box
+  close_box: 4000,
 };
 
 const INITIAL_CONFIDENCE_HISTORY: number[] = Array.from({ length: 50 }, (_, i) => {

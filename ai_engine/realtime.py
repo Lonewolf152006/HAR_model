@@ -552,6 +552,10 @@ class DecisionStabilizer:
         self.release_counter_red = 0
         self.release_counter_blue = 0
 
+        # Motion-triggered and timed SOP transitions (3 to 4 sec)
+        self.motion_start_time = 0.0          # Tracks when motion started from idle
+        self.blue_in_confirm_time = 0.0       # Tracks when place_blue_in occurred
+
     def check_operator_mistake(self, raw_label, raw_conf, expected_action, now,
                                 containment=None, red_box=None, blue_box=None, main_box=None,
                                 dist_red=999.0, dist_blue=999.0, dist_main=999.0):
@@ -707,11 +711,49 @@ class DecisionStabilizer:
                     self.last_action_state = candidate
                     self.recent.clear()
                     self.causal_logic.apply_transition(candidate)
+                    self.blue_in_confirm_time = now
                     self.last_rejected_reason = "physics: blue placed in box"
                     ts_print(f"[PHYSICS EVENT] -> place_blue_in (Hands empty, blue placed in box)")
                     return True, self.current_state, candidate, 0.95, "physics: blue placed in box"
             else:
                 self.release_counter_blue = 0
+
+        # 3c. Automatic Motion-Triggered Open Box (Within 3 to 4 seconds of movement)
+        if self.use_fsm and not self.causal_logic.box_open and (expected_action in ("open_box", None)):
+            if motion >= (MOTION_THRESHOLD * 0.70):
+                if self.motion_start_time == 0.0:
+                    self.motion_start_time = now
+                elif (now - self.motion_start_time) >= 3.5:
+                    self.motion_start_time = 0.0
+                    candidate = "open_box"
+                    self.current_state = candidate
+                    self.last_change_time = now
+                    self.dwell_until = now + self.dwell_sec
+                    self.last_action_state = candidate
+                    self.recent.clear()
+                    self.causal_logic.apply_transition(candidate)
+                    self.last_rejected_reason = "timed: 3.5s motion confirmed open_box"
+                    ts_print(f"[PROCEDURE EVENT] -> open_box (3.5s motion detected, container opened)")
+                    return True, self.current_state, candidate, 0.95, "timed: 3.5s motion confirmed open_box"
+            else:
+                self.motion_start_time = 0.0
+
+        # 3d. Automatic Close Box After Blue Placed In (Within 3 to 4 seconds)
+        if self.use_fsm and self.causal_logic.blue_placed_in and self.causal_logic.box_open:
+            if self.blue_in_confirm_time == 0.0:
+                self.blue_in_confirm_time = now
+            elif (now - self.blue_in_confirm_time) >= 3.5:
+                self.blue_in_confirm_time = 0.0
+                candidate = "close_box"
+                self.current_state = candidate
+                self.last_change_time = now
+                self.dwell_until = now + self.dwell_sec
+                self.last_action_state = candidate
+                self.recent.clear()
+                self.causal_logic.apply_transition(candidate)
+                self.last_rejected_reason = "timed: 3.5s after blue in confirmed close_box"
+                ts_print(f"[PROCEDURE EVENT] -> close_box (3.5s after blue in, container closed)")
+                return True, self.current_state, candidate, 0.95, "timed: 3.5s after blue in confirmed close_box"
 
         # 4. Motion Gate: non-idle actions require actual physical movement
         if predicted_class != IDLE_LABEL and motion < MOTION_THRESHOLD:
@@ -833,8 +875,14 @@ class DecisionStabilizer:
         if candidate != "idle":
             self.dwell_until = now + self.dwell_sec
             self.last_action_state = candidate   # track physical SOP progress (never reset by idle-settle)
-        self.recent.clear()
         self.causal_logic.apply_transition(candidate)
+        if candidate == "place_blue_in":
+            self.blue_in_confirm_time = now
+        elif candidate == "close_box":
+            self.blue_in_confirm_time = 0.0
+            self.motion_start_time = 0.0
+        elif candidate == "open_box":
+            self.motion_start_time = 0.0
         self.last_rejected_reason = "accepted"
         return True, self.current_state, candidate, confidence, self.last_rejected_reason
 
@@ -905,6 +953,13 @@ class DecisionStabilizer:
         self.last_action_state = cand   # keep skip-alert tracker in sync (same as update() path)
         self.recent.clear()
         self.causal_logic.apply_transition(cand)
+        if cand == "place_blue_in":
+            self.blue_in_confirm_time = now
+        elif cand == "close_box":
+            self.blue_in_confirm_time = 0.0
+            self.motion_start_time = 0.0
+        elif cand == "open_box":
+            self.motion_start_time = 0.0
         self.last_rejected_reason = "accepted (spotted)"
         return True, self.current_state, cand, conf, "accepted (spotted)"
 
