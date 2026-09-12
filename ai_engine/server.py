@@ -44,11 +44,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AstroFlow AI Edge Inference Server", version="1.0.0", lifespan=lifespan)
 
-# Enable CORS for Next.js console
+# Enable CORS for Next.js console (standard stateless API)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -101,7 +101,8 @@ async def websocket_telemetry(websocket: WebSocket):
         except Exception:
             pass
 
-    pipeline.voice.on_speech_event_callback = on_voice
+    if pipeline:
+        pipeline.voice.subscribe(on_voice)
 
     try:
         while True:
@@ -134,7 +135,8 @@ async def websocket_telemetry(websocket: WebSocket):
     except Exception as e:
         print(f"[WS] Disconnected: {e}")
     finally:
-        pipeline.voice.on_speech_event_callback = None
+        if pipeline:
+            pipeline.voice.unsubscribe(on_voice)
 
 
 # ---------------------------------------------------------------------------
@@ -158,11 +160,11 @@ def get_health():
 
 
 @app.post("/api/v1/infer")
-async def infer_frame(file: UploadFile = File(...)):
-    """Receives a frame from the browser video element and runs real YOLO + MediaPipe + TARModel inference."""
+def infer_frame(file: UploadFile = File(...)):
+    """Receives a frame from the browser video element and runs real YOLO + MediaPipe + TARModel inference in threadpool."""
     if not pipeline:
         return {"ok": False, "error": "Pipeline not initialized"}
-    contents = await file.read()
+    contents = file.file.read()
     nparr = np.frombuffer(contents, np.uint8)
     frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if frame is None:
@@ -231,7 +233,8 @@ def update_gates(req: GateUpdateRequest):
 @app.get("/api/v1/camera/devices")
 def list_cameras():
     devices = get_available_cameras()
-    return {"ok": True, "devices": devices, "active_source": pipeline.camera.source}
+    active_source = pipeline.camera.source if pipeline and hasattr(pipeline, "camera") else 0
+    return {"ok": True, "devices": devices, "active_source": active_source}
 
 
 class CameraSelectRequest(BaseModel):
@@ -240,7 +243,8 @@ class CameraSelectRequest(BaseModel):
 
 @app.put("/api/v1/camera/select")
 def select_camera(req: CameraSelectRequest):
-    pipeline.switch_camera(req.device_id)
+    if pipeline and hasattr(pipeline, "switch_camera"):
+        pipeline.switch_camera(req.device_id)
     return {"ok": True, "selected": req.device_id}
 
 

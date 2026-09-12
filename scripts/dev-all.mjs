@@ -8,7 +8,7 @@
  * Handles graceful shutdown on SIGINT / CTRL+C.
  */
 
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 
@@ -79,15 +79,26 @@ nextProcess.stderr.on("data", (data) => {
   }
 });
 
-// Graceful cleanup
+// Robust process tree termination (prevents lingering ports on Windows & Linux)
+function killTree(proc) {
+  if (!proc || !proc.pid) return;
+  try {
+    if (isWin) {
+      execSync(`taskkill /F /T /PID ${proc.pid}`, { stdio: "ignore" });
+    } else {
+      process.kill(-proc.pid, "SIGTERM");
+    }
+  } catch {
+    try {
+      proc.kill("SIGKILL");
+    } catch {}
+  }
+}
+
 function cleanup() {
   console.log("\n\x1b[31m[SYS] Shutting down AstroFlow AI services...\x1b[0m");
-  try {
-    aiProcess.kill("SIGINT");
-  } catch (e) {}
-  try {
-    nextProcess.kill("SIGINT");
-  } catch (e) {}
+  killTree(aiProcess);
+  killTree(nextProcess);
   process.exit(0);
 }
 

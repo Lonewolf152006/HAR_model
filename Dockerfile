@@ -43,7 +43,9 @@ RUN pip install --no-cache-dir \
     "fastapi" \
     "uvicorn[standard]" \
     "websockets" \
-    "pyttsx3"
+    "pyttsx3" \
+    "python-multipart" \
+    "requests"
 
 # Copy full application code
 COPY . .

@@ -29,57 +29,32 @@ AstroFlow AI is a mission-critical edge AI avionics console built to monitor ast
 
 Rather than relying on noisy frame-by-frame classifiers, AstroFlow AI integrates deep spatial-temporal neural networks with a deterministic 5-Gate Decision Stabilizer, a 2.5D geometric containment engine, and a 100% offline personal assistant voice copilot that detects protocol skips and speaks aloud to correct mistakes in real time.
 
-```
-+---------------------------------------------------------------------------------------------------+
-|                                   ASTROFLOW AI RUNTIME TOPOLOGY                                   |
-+---------------------------------------------------------------------------------------------------+
-|                                                                                                   |
-|  [Video Source: Camo Studio / Laptop Webcam / OBS Virtual Camera / Recorded Experiment Video]     |
-|                                                  |                                                |
-|                                                  v                                                |
-|                            [In-Browser Zero-Latency Capture Canvas]                               |
-|                                (10Hz Normalized Frame Streamer)                                   |
-|                                                  |                                                |
-|                                                  v                                                |
-|                            [FastAPI Asynchronous Edge AI Server]                                  |
-|                                         (Port: 8080)                                              |
-|                         +------------------------+-----------------------+                        |
-|                         |                                                |                        |
-|                         v                                                v                        |
-|             [MediaPipe Biometrics]                            [Custom YOLOv8 Detector]            |
-|          (33 Pose + 42 Hand Landmarks)                  (main_box, red_box, blue_box)             |
-|                         |                                                |                        |
-|                         +------------------------+-----------------------+                        |
-|                                                  |                                                |
-|                                                  v                                                |
-|                             [332-D Spatial-Kinematic Feature Extractor]                           |
-|                            (166 Base Spatial + 166 Temporal Delta f)                              |
-|                                                  |                                                |
-|                                                  v                                                |
-|                               [TARModel: BiLSTM + Attention Head]                                 |
-|                                    (~600K Params | 7 Classes)                                     |
-|                                                  |                                                |
-|                                                  v                                                |
-|                             [5-Gate Deterministic DecisionStabilizer]                             |
-|                           Gate 1: Posterior Confidence (P >= 0.45)                                |
-|                           Gate 2: Stability Window (3-Frame Latch)                                |
-|                           Gate 3: Transition Cooldown (0.40s)                                     |
-|                           Gate 4: Kinematic Motion Floor (m >= 0.009)                             |
-|                           Gate 5: Physical Causal FSM Logic                                       |
-|                                                  |                                                |
-|                         +------------------------+-----------------------+                        |
-|                         |                                                |                        |
-|                         v                                                v                        |
-|            [Offline Voice Copilot TTS]                       [WebSocket / HTTP Bridge]            |
-|       (Speaks Specific Missed Steps Offline)                  (10Hz Real Telemetry JSON)          |
-|                         |                                                |                        |
-|                         +------------------------+-----------------------+                        |
-|                                                  |                                                |
-|                                                  v                                                |
-|                                 [Next.js 16 Mission Control Console]                              |
-|                         Tabs: Live Feed | SOP Tracker | Logs | Stream | Settings                  |
-|                                                                                                   |
-+---------------------------------------------------------------------------------------------------+
+```mermaid
+graph TD
+    classDef hw fill:#0E1015,stroke:#00E08A,stroke-width:1.5px,color:#E6E9ED;
+    classDef ai fill:#0E1015,stroke:#4DA3FF,stroke-width:1.5px,color:#E6E9ED;
+    classDef gate fill:#0E1015,stroke:#FFB020,stroke-width:1.5px,color:#E6E9ED;
+    classDef ui fill:#0E1015,stroke:#7928CA,stroke-width:1.5px,color:#E6E9ED;
+
+    A["Video Sources: Camo Studio / OBS Virtual Camera / Laptop Webcams / Uploaded Test Video"]:::hw --> B["In-Browser Zero-Latency Video Canvas"]:::hw
+    B -->|10Hz Frame Stream| C["FastAPI Edge Server (Port: 8080)"]:::ai
+    C --> D["MediaPipe 33-Pt Pose & 42-Pt Hands"]:::ai
+    C --> E["YOLOv8 Box Detector (main_box, red_box, blue_box)"]:::ai
+    D --> F["332-D Spatial-Kinematic Feature Vector"]:::ai
+    E --> F
+    F --> G["TARModel: BiLSTM + Multi-Head Self-Attention Head"]:::ai
+    G --> H["5-Gate Deterministic DecisionStabilizer"]:::gate
+    H -->|Gate 1: Posterior Confidence P >= 0.45| I{"All 5 Gates Passed?"}:::gate
+    H -->|Gate 2: Stability Window 3-Frame Hold| I
+    H -->|Gate 3: Transition Cooldown 0.40s| I
+    H -->|Gate 4: Kinematic Motion Floor m >= 0.009| I
+    H -->|Gate 5: Physical Causal FSM Logic| I
+    I -->|Yes: State Transition| J["Advance SOP State & Emit Telemetry"]:::gate
+    I -->|No: Sequence Jump Violation| K["Trigger Out-of-Order Alert"]:::gate
+    J --> L["Offline Voice Copilot TTS: Speaks Step Confirmation"]:::ui
+    K --> M["Offline Voice Copilot TTS: Speaks Procedural Correction"]:::ui
+    J --> N["Next.js 16 Mission Console: Live Feed, SOP Tracker, Logs"]:::ui
+    K --> N
 ```
 
 ---
@@ -98,28 +73,17 @@ The platform tracks a sequential 7-stage finite state machine governing containe
 | **05** | `place_blue_in` | `PLACE_BLUE_INTERIOR` | Container open; operator deposits blue sample inside |
 | **06** | `close_box` | `CLOSE_CONTAINER` | Red outside; blue inside; operator latches container lid |
 
-```
-    [ 00: IDLE_STANDBY ]
-             |
-             v
-    [ 01: OPEN_CONTAINER ]
-             |
-             v
-    [ 02: PICK_RED_CUBE ]
-             |
-             v
-    [ 03: PLACE_RED_EXTERIOR ]
-             |
-             v
-    [ 04: PICK_BLUE_CUBE ]
-             |
-             v
-    [ 05: PLACE_BLUE_INTERIOR ]
-             |
-             v
-    [ 06: CLOSE_CONTAINER ]
-             |
-             +-----------------------+ Loops to 00 upon cycle completion
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> IDLE_STANDBY: Operator Resting
+    IDLE_STANDBY --> OPEN_CONTAINER: 01. Open Box
+    OPEN_CONTAINER --> PICK_RED_CUBE: 02. Pick Red Sample
+    PICK_RED_CUBE --> PLACE_RED_EXTERIOR: 03. Place Red Out
+    PLACE_RED_EXTERIOR --> PICK_BLUE_CUBE: 04. Pick Blue Sample
+    PICK_BLUE_CUBE --> PLACE_BLUE_INTERIOR: 05. Place Blue Inside
+    PLACE_BLUE_INTERIOR --> CLOSE_CONTAINER: 06. Close Container
+    CLOSE_CONTAINER --> IDLE_STANDBY: Cycle Complete (+1)
 ```
 
 ---
@@ -181,11 +145,14 @@ To prevent false transitions caused by frame flicker, microgravity floating limb
 
 ---
 
-### [>] Repository Velocity & Commit Analytics
+### [>] Repository Velocity & Developer Metrics
 
 <div align="center">
 
-![DevInfinix Activity Graph](https://github-readme-activity-graph.vercel.app/graph?username=DevInfinix&theme=react-dark&hide_border=true&area=true&color=00E08A&point=4DA3FF)
+[![DevInfinix GitHub Stats](https://github-readme-stats.vercel.app/api?username=DevInfinix&show_icons=true&theme=tokyonight&hide_border=true&bg_color=0E1015&title_color=00E08A&icon_color=4DA3FF&text_color=E6E9ED)](https://github.com/DevInfinix)
+[![GitHub Streak](https://streak-stats.demolab.com/?user=DevInfinix&theme=tokyonight&hide_border=true&background=0E1015&ring=00E08A&fire=00E08A&currStreakLabel=00E08A)](https://github.com/DevInfinix)
+
+[![Top Languages](https://github-readme-stats.vercel.app/api/top-langs/?username=DevInfinix&layout=compact&theme=tokyonight&hide_border=true&bg_color=0E1015&title_color=00E08A&text_color=E6E9ED)](https://github.com/DevInfinix)
 
 </div>
 

@@ -28,6 +28,7 @@ import realtime as rt
 from pose_extract_advanced import extract_base_features, BASE_DIM
 import pose_extract_advanced as pea
 from ai_engine.tts import VoiceCopilot
+from ai_engine.camera import CameraManager
 
 # Re-export core FSM classes for backward compatibility
 PhysicalCausalLogic = rt.PhysicalCausalLogic
@@ -40,6 +41,7 @@ class AstroFlowPipeline:
         print(f"[PIPELINE] Initializing models from {rt.MODEL_PATH} and {rt.YOLO_MODEL_PATH}...")
         self.tar_model = rt.load_tar_model(rt.MODEL_PATH)
         self.yolo_model = rt.load_yolo(rt.YOLO_MODEL_PATH)
+        self.camera = CameraManager(initial_source=0)
 
         self.stabilizer = rt.DecisionStabilizer(
             rt.CONFIDENCE_THRESHOLD, rt.STABILITY_WINDOW, rt.COOLDOWN_SEC, rt.CYCLE_COOLDOWN_SEC
@@ -63,10 +65,16 @@ class AstroFlowPipeline:
         self.pose_missing_frames = 0
 
     def start(self):
+        self.camera.start()
         self.voice.start()
 
     def stop(self):
+        self.camera.stop()
         self.voice.stop()
+
+    def switch_camera(self, device_id):
+        if hasattr(self, "camera") and self.camera:
+            self.camera.switch_source(device_id)
 
     def process_frame(self, frame, fps=30.0):
         t0 = time.time()

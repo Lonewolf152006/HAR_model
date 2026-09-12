@@ -48,6 +48,7 @@ export function VideoCanvas() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hiddenCanvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const prevObjectUrlRef = useRef<string | null>(null);
 
   const [reticlePos, setReticlePos] = useState({ x: 50, y: 50 });
   const [isHovered, setIsHovered] = useState(false);
@@ -127,7 +128,13 @@ export function VideoCanvas() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Revoke prior blob URL to avoid memory leaks
+    if (prevObjectUrlRef.current) {
+      URL.revokeObjectURL(prevObjectUrlRef.current);
+    }
     const url = URL.createObjectURL(file);
+    prevObjectUrlRef.current = url;
+
     setIsPlayingVideoFile(true);
     setActiveCamName(`Test File: ${file.name}`);
 
@@ -141,11 +148,24 @@ export function VideoCanvas() {
 
   const handleSwitchToCamera = () => {
     setIsPlayingVideoFile(false);
+    if (prevObjectUrlRef.current) {
+      URL.revokeObjectURL(prevObjectUrlRef.current);
+      prevObjectUrlRef.current = null;
+    }
     if (videoRef.current) {
       videoRef.current.src = "";
     }
     activateCamera(selectedDeviceId);
   };
+
+  // Cleanup object URLs on unmount
+  useEffect(() => {
+    return () => {
+      if (prevObjectUrlRef.current) {
+        URL.revokeObjectURL(prevObjectUrlRef.current);
+      }
+    };
+  }, []);
 
   // 2. Real-Time AI Inference Loop (10Hz Frame Grabber feeding Python backend)
   useEffect(() => {

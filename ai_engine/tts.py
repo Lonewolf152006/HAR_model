@@ -46,7 +46,17 @@ class VoiceCopilot:
         self.last_spoken_text = ""
         self.last_spoken_time = 0.0
         self.lock = threading.Lock()
-        self.on_speech_event_callback = None
+        self.listeners = set()
+
+    def subscribe(self, callback):
+        """Register a subscriber callback to receive synthesized speech events."""
+        with self.lock:
+            self.listeners.add(callback)
+
+    def unsubscribe(self, callback):
+        """Unregister a subscriber callback."""
+        with self.lock:
+            self.listeners.discard(callback)
 
     def start(self):
         if self.running:
@@ -92,10 +102,12 @@ class VoiceCopilot:
                 self.speech_queue.task_done()
                 continue
 
-            # Notify attached callbacks (e.g. WebSocket streamer for browser speech)
-            if self.on_speech_event_callback:
+            # Notify all attached subscribers (e.g. WebSocket streamers for browser speech)
+            with self.lock:
+                active_listeners = list(self.listeners)
+            for cb in active_listeners:
                 try:
-                    self.on_speech_event_callback(text)
+                    cb(text)
                 except Exception:
                     pass
 
