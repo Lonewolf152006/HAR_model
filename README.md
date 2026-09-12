@@ -1,6 +1,6 @@
 <div align="center">
 
-![AstroFlow AI Mission Banner](https://capsule-render.vercel.app/api?type=waving&color=0:0B0D10,40:0E171F,75:0A2518,100:00E08A&height=240&section=header&text=ASTROFLOW%20AI&fontSize=52&fontColor=ffffff&fontAlignY=38&desc=Autonomous%20Avionics%20Computer%20Vision%20%26%20SOP%20Verification%20Platform&descAlignY=60&descSize=16&descAlign=50)
+![AstroFlow AI Mission Banner](assets/banner.jpg)
 
 [![System Status](https://img.shields.io/badge/System_Status-NOMINAL-00E08A?style=for-the-badge&logo=spacex&logoColor=white&labelColor=0E1015)](https://github.com/Aryasurya12/AstroFlow-AI)
 [![Mission Node](https://img.shields.io/badge/Node-ISS--COLUMBUS--HAR-4DA3FF?style=for-the-badge&logo=nasa&logoColor=white&labelColor=0E1015)](https://github.com/Aryasurya12/AstroFlow-AI)
@@ -108,12 +108,12 @@ To prevent false transitions caused by frame flicker, microgravity floating limb
 
 | 01. Live Video Feed & Pose Tracking | 02. SOP Tracker & Causal Directed Graph |
 | :---: | :---: |
-| ![Live Feed Console](https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=640&q=80) | ![SOP Tracker Console](https://images.unsplash.com/photo-1506703719100-a0f3a48c0f86?auto=format&fit=crop&w=640&q=80) |
+| ![Live Feed Console](assets/page1.jpg) | ![SOP Tracker Console](assets/page2.jpg) |
 | *Real-Time Camera Feed, Biometric Pose Skeleton & 5-Gate Telemetry* | *Sequential Flight Plan Strip, Dwell Timers & State Machine Topography* |
 
 | 03. NVRAM Black-Box Flight Recorder | 04. Hardware Settings & Calibration |
 | :---: | :---: |
-| ![Black Box Logs](https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=640&q=80) | ![Avionics Settings](https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=640&q=80) |
+| ![Black Box Logs](assets/page3.jpg) | ![Avionics Settings](assets/page4.jpg) |
 | *Chronological Flight Logs, Multi-Tier Filter & CSV/JSONL Exporter* | *Multi-Camera Source Switcher, Gate Sensitivity Sliders & Model Manifest* |
 
 </div>
