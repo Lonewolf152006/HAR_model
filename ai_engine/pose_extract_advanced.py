@@ -158,13 +158,12 @@ def get_yolo_override_boxes(yolo_model, frame):
     return (yolo_red, yolo_blue, yolo_main)
 
 
-# Calibrated red ranges: strictly matches vivid Lotte Choco Pie scarlet packaging.
-# S >= 155 completely separates scarlet Choco Pie packaging from human skin (skin saturation <= 130).
-RED_RANGES = [((0, 155, 80), (8, 255, 255)), ((170, 155, 80), (180, 255, 255))]
-# Calibrated blue/purple ranges: matches Cadbury Silk purple/violet and royal blue packaging (Hue 95 to 170)
-BLUE_RANGE = [((95, 30, 25), (170, 255, 255))]
-COLOR_MIN_AREA_RED = 1500   # Choco Pie box is substantial; rejects small threads/clothing patches
-COLOR_MIN_AREA_BLUE = 800    # Solid Cadbury Silk box; rejects tiny reflections
+# Robust red ranges: matches scarlet Lotte Choco Pie and red boxes under natural and artificial lighting.
+RED_RANGES = [((0, 65, 45), (14, 255, 255)), ((165, 65, 45), (180, 255, 255))]
+# Robust blue/purple ranges: matches Cadbury Silk purple/violet, royal blue, and blue cube packaging
+BLUE_RANGE = [((90, 30, 25), (170, 255, 255))]
+COLOR_MIN_AREA_RED = 450   # Substantial red box threshold
+COLOR_MIN_AREA_BLUE = 350  # Cadbury Silk / Blue box threshold
 COLOR_MIN_AREA = COLOR_MIN_AREA_RED
 
 # ================= SHAPE DETECTION (main box fallback - no reliable color) =================
@@ -552,8 +551,11 @@ def extract_base_features(pose_res, hand_res, frame, override_boxes=None):
 
     edge_debug = None
     if main is None:
-        exclude_sub = [b["rect"] for b in (red, blue) if b is not None]
-        main, edge_debug = detect_main_box(frame, exclusion_mask=body_mask, exclude_rects=exclude_sub)
+        # Only fallback to edge-based container detection if candidate sub-boxes exist in the scene,
+        # preventing empty room walls and computer desks from hallucinating a phantom container!
+        if red is not None or blue is not None:
+            exclude_sub = [b["rect"] for b in (red, blue) if b is not None]
+            main, edge_debug = detect_main_box(frame, exclusion_mask=body_mask, exclude_rects=exclude_sub)
 
     red_stats = _box_stats(red, frame.shape)
     blue_stats = _box_stats(blue, frame.shape)

@@ -151,7 +151,7 @@ class AstroFlowPipeline:
                 "y": round((my / h) * 100, 1),
                 "w": round((mw / w) * 100, 1),
                 "h": round((mh / h) * 100, 1),
-                "color": "#4DA3FF",
+                "color": "#00E08A",
                 "status": "OPEN" if self.stabilizer.causal_logic.box_open else "CLOSED"
             })
         if red_box and "rect" in red_box:
@@ -177,7 +177,7 @@ class AstroFlowPipeline:
                 "y": round((by / h) * 100, 1),
                 "w": round((bw / w) * 100, 1),
                 "h": round((bh / h) * 100, 1),
-                "color": "#00E08A",
+                "color": "#2979FF",
                 "status": self.containment.blue_status
             })
 
